@@ -173,6 +173,7 @@ export default function (pi: ExtensionAPI) {
 					browserHandle = await startBrowserSyncServer({
 						questions,
 						onAnswer: (questionId, value) => activeComponent?.applyBrowserAnswer?.(questionId, value),
+						onClearAnswer: (questionId) => activeComponent?.applyBrowserClearAnswer?.(questionId),
 						onTab: (currentTab) => activeComponent?.applyBrowserTab?.(currentTab),
 						onOptions: (options) => activeComponent?.applyBrowserOptions?.(options),
 						onSubmit: () => activeComponent?.applyBrowserSubmit?.(),

@@ -209,12 +209,13 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /input\.onfocus = \(\) => activateQuestion\(i\)/);
 		assert.match(page.text, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
 		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
+		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
 	} finally {
 		await handle.stop();
 	}
 });
 
-test("empty number answers are ignored instead of coerced to zero", async () => {
+test("empty number answers clear stale state instead of coercing to zero", async () => {
 	const numberQuestions = normalizeQuestions([
 		{ id: "count", header: "Count", question: "How many?", type: "number", min: 0 },
 	]);
@@ -222,17 +223,21 @@ test("empty number answers are ignored instead of coerced to zero", async () => 
 	const handle = await startBrowserSyncServer({
 		questions: numberQuestions,
 		preferredPort: 0,
-		onAnswer: (questionId, value) => events.push({ questionId, value }),
+		onAnswer: (questionId, value) => events.push({ type: "answer", questionId, value }),
+		onClearAnswer: (questionId) => events.push({ type: "clear", questionId }),
 	});
 	let client;
 	try {
 		client = await connectWs(handle);
 		await client.nextMessage("state");
+		client.send({ type: "answer", questionId: "count", value: 5 });
+		assert.deepEqual(await client.nextMessage("answers"), { type: "answers", answers: { "0": 5 } });
 		client.send({ type: "answer", questionId: "count", value: null });
-		await new Promise((resolve) => setTimeout(resolve, 30));
-		assert.deepEqual(events, []);
-		client.send({ type: "ping" });
-		assert.deepEqual(await client.nextMessage("pong"), { type: "pong" });
+		assert.deepEqual(await client.nextMessage("answers"), { type: "answers", answers: {} });
+		assert.deepEqual(events, [
+			{ type: "answer", questionId: "count", value: 5 },
+			{ type: "clear", questionId: "count" },
+		]);
 	} finally {
 		client?.close();
 		await handle.stop();

@@ -23,6 +23,7 @@ export interface BrowserSyncServerOptions {
 	preferredPort?: number;
 	host?: typeof LOOPBACK_HOST;
 	onAnswer?: (questionId: string, value: AnswerValue) => void;
+	onClearAnswer?: (questionId: string) => void;
 	onTab?: (currentTab: number) => void;
 	onOptions?: (options: BrowserOptionsState) => void;
 	onSubmit?: () => void;
@@ -93,6 +94,7 @@ export async function startBrowserSyncServer(
 	const callbacks = {
 		log: opts.log ?? NO_LOG,
 		onAnswer: opts.onAnswer,
+		onClearAnswer: opts.onClearAnswer,
 		onTab: opts.onTab,
 		onOptions: opts.onOptions,
 		onSubmit: opts.onSubmit,
@@ -378,6 +380,12 @@ function handleBrowserAnswer(state: BrowserSyncServerInternal, message: Record<s
 	const questionId = typeof message.questionId === "string" ? message.questionId : "";
 	const index = state.questions.findIndex((question) => question.id === questionId);
 	if (index === -1) return;
+	if (message.value === null) {
+		delete state.answers[String(index)];
+		state.callbacks.onClearAnswer?.(questionId);
+		broadcast(state, { type: "answers", answers: state.answers });
+		return;
+	}
 	const value = coerceAnswer(message.value, state.questions[index]);
 	if (value === undefined) return;
 	state.answers[String(index)] = value;
@@ -533,10 +541,13 @@ let state = { questions: BOOT.questions, currentTab: BOOT.currentTab, answers: B
 let socket;
 let expanded = new Set();
 let sendTimer;
+let reconnectTimer;
+let reconnectDelay = 500;
 function connect(){
+  clearTimeout(reconnectTimer);
   socket = new WebSocket(BOOT.wsUrl);
-  socket.onopen = () => { document.getElementById('status').textContent = 'Connected'; };
-  socket.onclose = () => { document.getElementById('status').textContent = 'Disconnected'; };
+  socket.onopen = () => { reconnectDelay = 500; document.getElementById('status').textContent = 'Connected'; };
+  socket.onclose = () => { document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if(message.type === 'state') state = {...state, ...message};
