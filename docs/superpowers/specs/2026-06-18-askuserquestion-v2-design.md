@@ -341,7 +341,7 @@ Cache location: `~/.cache/pi-questionnaire/vendor/`. Dependency URLs must be ver
 
 ### 6.4 Live updates
 
-WebSocket connection to the server. On every event, the relevant DOM is updated. The TUI's tab-switch and answer changes flow through the same channel.
+WebSocket connection to the server. On every event, the relevant DOM is updated. TUI-originated answer, notes, and activeQuestion changes are mirrored to the server and pushed to the browser, so the browser scrolls to / highlights the current question and reflects any in-TUI edits. Browser-originated answer, notes, focus, submit, and cancel changes flow in the opposite direction.
 
 ## 7. Port and URL
 
