@@ -31,7 +31,7 @@ This symlinks `src/index.ts` into your global `~/.pi/agent/extensions/` and inst
 ```bash
 pnpm install
 # then add to ~/.pi/agent/settings.json → extensions:
-#   /absolute/path/to/pi-questionnarie/src/index.ts
+#   /absolute/path/to/pi-questionnaire/src/index.ts
 ```
 
 ## Quick start
