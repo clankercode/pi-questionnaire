@@ -47,6 +47,15 @@ export interface TuiOptions {
 	 * Defaults to `process.stdout.write`. Override in tests to capture.
 	 */
 	terminalWriter?: (s: string) => void;
+	/** Browser-origin updates suppress immediate TUI redraws and refresh
+	 * after this idle window. Production default is 3s; tests override. */
+	browserIdleMs?: number;
+}
+
+export interface BrowserTuiState {
+	currentTab: number;
+	answers: Record<string, AnswerValue>;
+	notes: Record<string, string>;
 }
 
 // ---- Tabs -----------------------------------------------------------------
@@ -283,6 +292,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		let inputQuestionId: string | null = null;
 		let browserUrl: string | null = null;
 		let lastBrowserOpenAttempt: { url: string; at: number } | null = null;
+		let browserOpenHandler: ((url: string) => void) | null = null;
+		let browserRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+		const browserIdleMs = opts.browserIdleMs ?? 3000;
 
 		const editorTheme: EditorTheme = {
 			borderColor: (s: string) => theme.fg("accent", s),
@@ -316,6 +328,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function refresh() {
 			tui.requestRender();
+		}
+
+		function scheduleBrowserRefresh() {
+			if (browserRefreshTimer !== null) clearTimeout(browserRefreshTimer);
+			browserRefreshTimer = setTimeout(() => {
+				browserRefreshTimer = null;
+				refresh();
+			}, browserIdleMs);
+			const handle = browserRefreshTimer as unknown as { unref?: () => void };
+			if (typeof handle.unref === "function") handle.unref();
+		}
+
+		function clearBrowserRefresh() {
+			if (browserRefreshTimer !== null) {
+				clearTimeout(browserRefreshTimer);
+				browserRefreshTimer = null;
+			}
 		}
 
 		// is_dangerous questions require the user to type a confirmation
@@ -418,6 +447,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function saveAnswer(q: CanonicalQuestion, value: AnswerValue) {
 			const idx = questions.findIndex((x) => x.id === q.id);
 			answers.set(q.id, { id: q.id, index: idx, type: q.type, value });
+			syncCheckedFromAnswer(q, value);
+		}
+
+		function syncCheckedFromAnswer(q: CanonicalQuestion, value: AnswerValue) {
+			if (q.type !== "select_many" || !Array.isArray(value)) return;
+			const opts = getRenderOptions(q);
+			const set = new Set<number>();
+			for (const entry of value) {
+				if (
+					typeof entry === "object" && entry !== null && !Array.isArray(entry)
+					&& (entry as { mode?: string }).mode === "option"
+				) {
+					const idx = opts.findIndex((opt) => opt.label === (entry as { value?: string }).value);
+					if (idx !== -1) set.add(idx);
+				}
+			}
+			checked[q.id] = set;
 		}
 
 		function commitAndAdvance() {
@@ -441,12 +487,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function submit() {
 			if (durationTimer !== null) clearInterval(durationTimer);
+			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
 			done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
 		}
 
 		function cancel() {
 			if (durationTimer !== null) clearInterval(durationTimer);
+			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
 			done({ answers: [], notes, lifecycle: "cancelled" });
 		}
@@ -458,6 +506,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				clearInterval(durationTimer);
 				durationTimer = null;
 			}
+			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
 		}
 
@@ -929,11 +978,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				return;
 			}
 			if (data === "o") {
-				// Open browser URL (slice 5 will hook this up; for now we record)
 				if (browserUrl) {
 					lastBrowserOpenAttempt = { url: browserUrl, at: Date.now() };
-					// In a real implementation, we'd spawn xdg-open/open/start here.
-					// The slice 5+ server module will register an openBrowser() callback.
+					browserOpenHandler?.(browserUrl);
 				}
 				refresh();
 				return;
@@ -1040,8 +1087,53 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			browserUrl = url;
 		}
 
+		function setBrowserOpenHandler(handler: ((url: string) => void) | null) {
+			browserOpenHandler = handler;
+		}
+
 		function getBrowserOpenAttempt() {
 			return lastBrowserOpenAttempt;
+		}
+
+		function getBrowserState(): BrowserTuiState {
+			const answerMap: Record<string, AnswerValue> = {};
+			for (const answer of answers.values()) {
+				answerMap[String(answer.index)] = answer.value;
+			}
+			return { currentTab, answers: answerMap, notes: { ...notes } };
+		}
+
+		function applyBrowserTab(tab: number) {
+			currentTab = Math.max(0, Math.min(questions.length, tab));
+			optionIndex = 0;
+			reconcileMode();
+			scheduleBrowserRefresh();
+		}
+
+		function applyBrowserAnswer(questionId: string, value: AnswerValue) {
+			const q = questions.find((question) => question.id === questionId);
+			if (!q) return;
+			saveAnswer(q, value);
+			scheduleBrowserRefresh();
+		}
+
+		function applyBrowserOptions(options: { notes?: Record<string, string> }) {
+			if (options.notes) {
+				for (const key of Object.keys(notes)) delete notes[key];
+				for (const [key, value] of Object.entries(options.notes)) {
+					const q = questions.find((question) => question.id === key) ?? questions[Number(key)];
+					if (q && value.trim() !== "") notes[q.id] = value;
+				}
+			}
+			scheduleBrowserRefresh();
+		}
+
+		function applyBrowserSubmit() {
+			submit();
+		}
+
+		function applyBrowserCancel() {
+			cancel();
 		}
 
 		// ---- Visual frame + inline Other text input -----------------------
@@ -1097,10 +1189,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (browser) {
 				lines.push(theme.fg("muted", `🌐 ${browser} (press o to open)`));
 			} else {
-				// Placeholder for slice 5+ (HTTP+WebSocket browser sync).
-				// Shown dimmed so the user knows the line is reserved
-				// for a future feature, not just missing.
-				lines.push(theme.fg("dim", "🌐 browser sync — slice 5+ (not yet available)"));
+				lines.push(theme.fg("dim", "🌐 browser sync unavailable"));
 			}
 			if (noteIndicator) {
 				lines.push(theme.fg("muted", `Note: ${note}`));
@@ -1365,9 +1454,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			invalidate() {
 				refresh();
 			},
-			// Exposed for slice 5+ to wire up
 			setBrowserUrl,
+			setBrowserOpenHandler,
 			getBrowserOpenAttempt,
+			getBrowserState,
+			applyBrowserTab,
+			applyBrowserAnswer,
+			applyBrowserOptions,
+			applyBrowserSubmit,
+			applyBrowserCancel,
 			// Test helpers: read/write the editor's text directly. Used by
 			// the is_dangerous tests to verify the revisit prefill path
 			// (after re-mounting / navigating back) without having to drive
