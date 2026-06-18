@@ -289,6 +289,55 @@ test("normalize caps user options at 7 so post-Other is 8", () => {
 	assert.equal(r.value[0].options.length, 8, "capped at 8 (7 + Other)");
 });
 
+test("multi_select single-question: Space toggles without submitting", () => {
+	// Regression: previously Space on a single-question multi_select
+	// immediately submitted with just the one option. The correct UX is
+	// Space=toggle, Enter=submit.
+	const { component, getDone } = drive([{
+		header: "ms",
+		question: "Pick toppings?",
+		type: "select_many",
+		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+	}]);
+	component.handleInput(" "); // toggle A — should NOT submit
+	assert.equal(getDone(), null, "Space should not submit on multi_select");
+	component.handleInput("\u001b[B"); // down to B
+	component.handleInput(" "); // toggle B
+	assert.equal(getDone(), null, "Space should still not submit");
+	component.handleInput("\u001b[B"); // down to C
+	component.handleInput(" "); // toggle C
+	assert.equal(getDone(), null, "Space should still not submit");
+	// Now Enter to commit
+	component.handleInput("\r");
+	const v = getDone();
+	assert.ok(v !== null, "Enter should submit");
+	if (v) {
+		assert.equal(v.lifecycle, "answered");
+		const a = v.answers[0];
+		const labels = a.value.map((x) => x.value).sort();
+		assert.deepEqual(labels, ["A", "B", "C"]);
+	}
+});
+
+test("multi_select single-question: 1-9 toggles without submitting", () => {
+	const { component, getDone } = drive([{
+		header: "ms",
+		question: "Pick?",
+		type: "select_many",
+		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+	}]);
+	component.handleInput("1"); // toggle A
+	component.handleInput("2"); // toggle B
+	assert.equal(getDone(), null, "1-9 should not submit on multi_select");
+	component.handleInput("\r"); // commit
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		const labels = v.answers[0].value.map((x) => x.value).sort();
+		assert.deepEqual(labels, ["A", "B"]);
+	}
+});
+
 // ---- Slice 2 features ----------------------------------------------------
 
 test("Tab swaps to notes view; Esc returns to answer view", () => {

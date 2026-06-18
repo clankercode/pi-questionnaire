@@ -242,23 +242,35 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		// --- option selection ----------------------------------------------
 
+		/** Toggle a multi-select option (does NOT submit). */
+		function toggleOption(idx: number, q: CanonicalQuestion) {
+			if (q.type !== "select_many") return;
+			const set = checked[q.id] ?? new Set<number>();
+			if (set.has(idx)) set.delete(idx);
+			else set.add(idx);
+			checked[q.id] = set;
+			const opts = getRenderOptions(q);
+			const arr: { mode: "option"; value: string }[] = [];
+			for (const i of set) {
+				if (!opts[i].isOther) arr.push({ mode: "option", value: opts[i].label });
+			}
+			saveAnswer(q, arr as AnswerValue);
+			refresh();
+		}
+
+		/** Commit the current multi-select selection (with current array). */
+		function commitMultiSelect(q: CanonicalQuestion) {
+			if (q.type !== "select_many") return;
+			// If the user hasn't toggled anything, treat as empty submit (no
+			// answer). The TUI's allAnswered() will block submit.
+			commitAndAdvance();
+		}
+
 		function selectOption(idx: number, q: CanonicalQuestion) {
 			if (q.type === "select_many") {
-				const set = checked[q.id] ?? new Set<number>();
-				if (set.has(idx)) set.delete(idx);
-				else set.add(idx);
-				checked[q.id] = set;
-				const opts = getRenderOptions(q);
-				const arr: { mode: "option"; value: string }[] = [];
-				for (const i of set) {
-					if (!opts[i].isOther) arr.push({ mode: "option", value: opts[i].label });
-				}
-				saveAnswer(q, arr as AnswerValue);
-				if (!isMulti) {
-					submit();
-					return;
-				}
-				refresh();
+				// Back-compat: selectOption is called from 1-9 path. For
+				// multi_select, 1-9 should toggle, not submit.
+				toggleOption(idx, q);
 				return;
 			}
 			if (q.type === "confirm_enum") {
@@ -514,16 +526,19 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				return;
 			}
 
-			// Space: toggle on select_many
+			// Space: toggle on select_many (does NOT submit)
 			if (q.type === "select_many" && matchesKey(data, Key.space)) {
-				selectOption(optionIndex, q);
+				toggleOption(optionIndex, q);
 				return;
 			}
 
 			// Enter
 			if (matchesKey(data, Key.enter)) {
-				if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
+				if (q.type === "select_one" || q.type === "confirm_enum") {
 					selectOption(optionIndex, q);
+				} else if (q.type === "select_many") {
+					// Enter on multi_select commits the full array
+					commitMultiSelect(q);
 				} else if (q.type === "number") {
 					inputMode = "number";
 					inputQuestionId = q.id;
@@ -538,14 +553,18 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				return;
 			}
 
-			// 1-9: select option on choice questions
+			// 1-9: toggle option on multi_select, select on select_one/confirm_enum
 			if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 				const opts = getRenderOptions(q);
 				const numericMax = opts.length - 1; // last index = "Other"
 				if (data >= "1" && data <= "9") {
 					const n = Number(data) - 1;
 					if (n <= numericMax) {
-						selectOption(n, q);
+						if (q.type === "select_many") {
+							toggleOption(n, q);
+						} else {
+							selectOption(n, q);
+						}
 					}
 					return;
 				}
