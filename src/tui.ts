@@ -92,7 +92,7 @@ function renderOptionLine(
 	const isOther = opt.isOther === true;
 	const head = (() => {
 		if (checked !== undefined) {
-			const arrow = selected ? theme.fg("accent", "▶ ") : "  ";
+			const arrow = selected ? theme.fg("accent", "👉 ") : "   ";
 			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
 			return `${arrow}${box} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 		}
@@ -178,6 +178,10 @@ const KEYMAP_HELP = [
 	"",
 	"  Press any key to dismiss this help.",
 ];
+
+function frameInnerWidth(width: number): number {
+	return width < 12 ? width : width - 2;
+}
 
 // ---- Terminal title (OSC 0) --------------------------------------------
 
@@ -874,11 +878,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function wrapInFrame(inner: string[], width: number): string[] {
 			const minWidth = 12;
 			if (width < minWidth) return inner;
-			const innerWidth = width - 2;
+			const innerWidth = frameInnerWidth(width);
 			const out: string[] = [];
 			const dim = (s: string) => theme.fg("muted", s);
 			const titleLabel = `─ ${FRAME_TITLE} `;
-			const titleRemaining = innerWidth - titleLabel.length - 1;
+			const titleRemaining = innerWidth - titleLabel.length;
 			const topBorder =
 				"┌" +
 				titleLabel +
@@ -886,11 +890,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				"┐";
 			out.push(dim(topBorder));
 			for (const line of inner) {
-				const vw = visibleWidth(line);
-				const pad = Math.max(0, innerWidth - vw);
-				out.push(dim("│") + line + " ".repeat(pad) + dim("│"));
+				const wrapped = wrapTextWithAnsi(line, Math.max(1, innerWidth));
+				for (const segment of wrapped) {
+					const vw = visibleWidth(segment);
+					const pad = Math.max(0, innerWidth - vw);
+					out.push(dim("│") + segment + " ".repeat(pad) + dim("│"));
+				}
 			}
-			out.push(dim("└" + "─".repeat(innerWidth - 1) + "┘"));
+			out.push(dim("└" + "─".repeat(innerWidth) + "┘"));
 			return out;
 		}
 
@@ -976,6 +983,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// drives the editor into the right state without every callsite
 			// having to remember to invoke reconcileMode().
 			reconcileMode();
+			const contentWidth = frameInnerWidth(width);
 
 			// Help overlay
 			if (viewMode === "help") {
@@ -1026,11 +1034,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					} else {
 						lines.push(`${theme.fg("success", "✓")} ${head}: ${renderAnsweredValue(a.value)}`);
 					}
-					const note = notes[q.id];
-					if (note) {
-						addWrappedWithPrefix(lines, "    ", theme.fg("muted", `note: ${note}`), width);
+						const note = notes[q.id];
+						if (note) {
+							addWrappedWithPrefix(lines, "    ", theme.fg("muted", `note: ${note}`), contentWidth);
+						}
 					}
-				}
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] submit  [Esc] cancel"));
 				return wrapInFrame(lines, width);
@@ -1055,16 +1063,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				);
 				lines.push("");
 				lines.push(theme.fg("warning", q.question));
-				if (q.description) {
-					lines.push("");
-					addWrapped(lines, theme.fg("muted", q.description), width);
-				}
+					if (q.description) {
+						lines.push("");
+						addWrapped(lines, theme.fg("muted", q.description), contentWidth);
+					}
 				lines.push("");
 				lines.push(theme.fg("accent", "Type the resource name to confirm:"));
 				lines.push("");
 				// Inline-render the editor so the user sees what they're typing.
 				// The host doesn't render the editor for inputMode === "danger".
-				lines.push(...editor.render(width));
+					lines.push(...editor.render(contentWidth));
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] confirm  [Esc] cancel"));
 				appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);
@@ -1073,10 +1081,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			lines.push(theme.fg("accent", theme.bold(q.header)));
 			lines.push(theme.fg("text", q.question));
-			if (q.description) {
-				lines.push("");
-				addWrapped(lines, theme.fg("muted", q.description), width);
-			}
+				if (q.description) {
+					lines.push("");
+					addWrapped(lines, theme.fg("muted", q.description), contentWidth);
+				}
 			lines.push("");
 
 			// Notes mode for this question
@@ -1108,7 +1116,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const fakeChecked = showOtherMark ? true : isChecked;
 					const active = isOtherOpt && isOtherChosen;
 					const previewExpanded = expandedPreview[q.id] === i;
-					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, width, theme, lines);
+					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, contentWidth, theme, lines);
 					if (isOtherOpt) {
 						// Inline text input under the Other option. Always
 						// prefill from the saved answer on first render of
@@ -1117,15 +1125,25 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						const draft = otherText[q.id] ?? "";
 						const inputActive = optionIndex === otherIdx;
 						if (inputActive) {
-							const arrow = theme.fg("accent", "▶ ");
+							const arrow = theme.fg("accent", "👉 ");
 							const label = theme.fg("muted", "Other:");
 							const value = draft.length === 0
 								? theme.fg("dim", "(type a custom answer)")
 								: theme.fg("accent", draft);
 							const cursor = theme.fg("accent", "▏");
-							lines.push(`     ${arrow}${label} ${value}${cursor}`);
+							addWrappedWithPrefix(
+								lines,
+								"     ",
+								`${arrow}${label} ${value}${cursor}`,
+								contentWidth,
+							);
 						} else if (draft.length > 0) {
-							lines.push(`     ${theme.fg("muted", `Other: ${draft}`)}`);
+							addWrappedWithPrefix(
+								lines,
+								"     ",
+								theme.fg("muted", `Other: ${draft}`),
+								contentWidth,
+							);
 						}
 					}
 				}
@@ -1133,7 +1151,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (q.type === "select_many") {
 					lines.push("");
 					const isSelect = optionIndex === opts.length;
-					const arrow = isSelect ? theme.fg("accent", "▶ ") : "  ";
+					const arrow = isSelect ? theme.fg("accent", "👉 ") : "   ";
 					const selectText = `${arrow}[Select]  ${theme.fg("muted", "(submit selected)")}`;
 					lines.push(theme.fg(isSelect ? "accent" : "text", selectText));
 				}
@@ -1166,10 +1184,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
 				}
 				const current = answers.get(q.id)?.value;
-				if (typeof current === "string" && current.length > 0) {
-					lines.push("");
-					addWrapped(lines, theme.fg("success", `Answered: ${current}`), width);
-				}
+					if (typeof current === "string" && current.length > 0) {
+						lines.push("");
+						addWrapped(lines, theme.fg("success", `Answered: ${current}`), contentWidth);
+					}
 				lines.push("");
 				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
 			}

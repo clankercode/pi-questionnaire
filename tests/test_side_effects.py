@@ -38,6 +38,22 @@ SELECT_Q = {
     "options": [{"label": "US"}, {"label": "EU"}],
 }
 
+DEFAULT_TEST_SETTINGS = {
+    "browserEnabled": True,
+    "browserAutoOpen": False,
+    "browserMinQuestions": 2,
+    "copyUrlToClipboard": True,
+    "bellOnQuestion": True,
+    "notificationOnQuestion": False,
+    "notificationDelaySeconds": 30,
+    "ttsOnQuestion": False,
+    "onQuestionCommand": "",
+    "heartbeatWhileActive": False,
+    "heartbeatIntervalMinutes": 4.5,
+    "debounceMs": 300,
+    "dangerCheckEnabled": True,
+}
+
 
 def _fire(params, settings=None, platform="linux", **overrides):
     """Run the harness and return the parsed trace.
@@ -51,7 +67,7 @@ def _fire(params, settings=None, platform="linux", **overrides):
     cmd = {
         "cmd": "fireSideEffects",
         "params": params,
-        "settings": settings or {},
+        "settings": {**DEFAULT_TEST_SETTINGS, **(settings or {})},
         "platform": platform,
     }
     cmd.update(overrides)

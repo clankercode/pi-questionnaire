@@ -56,11 +56,12 @@ test("AskUserQuestion clears side effects when ctx.ui.custom throws", async () =
 		if (handle && typeof handle === "object") handle.cleared = true;
 	});
 
-	try {
-		setInMemorySettings({
-			notificationOnQuestion: true,
-			notificationDelaySeconds: 5,
-		});
+		try {
+			setInMemorySettings({
+				notificationOnQuestion: true,
+				notificationDelaySeconds: 5,
+				heartbeatWhileActive: false,
+			});
 		await assert.rejects(
 			pi.tool.execute(
 				"call-1",

@@ -272,8 +272,8 @@ test("confirm_enum: arrow-down + Enter on Decline returns decline", () => {
 	}
 });
 
-test("select_one Other: Enter on Other opens text editor", () => {
-	const { component } = drive([{
+test("select_one Other: typing goes to the inline input and Enter commits", () => {
+	const { component, getDone } = drive([{
 		header: "x",
 		question: "Pick?",
 		type: "select_one",
@@ -281,14 +281,15 @@ test("select_one Other: Enter on Other opens text editor", () => {
 	}]);
 	component.handleInput("\u001b[B"); // down to B
 	component.handleInput("\u001b[B"); // down to Other
-	component.handleInput("\r"); // enter on Other → opens editor
-	// The component should now be in input mode; we just check it didn't crash.
-	const lines = component.render(80);
-	const joined = lines.join("\n");
-	// In input mode, the editor is shown (the prompt is rendered by the
-	// Editor component). We can't easily test editor output without a
-	// terminal mock, so just assert the question still appears.
-	assert.match(joined, /Pick\?/);
+	for (const ch of "custom") component.handleInput(ch);
+	let joined = component.render(80).join("\n");
+	assert.match(joined, /Other: custom/);
+	component.handleInput("\r");
+	const done = getDone();
+	assert.ok(done !== null);
+	if (done) {
+		assert.deepEqual(done.answers[0].value, { mode: "other", text: "custom" });
+	}
 });
 
 test("Esc cancels the whole questionnaire", () => {
@@ -556,6 +557,33 @@ test("Other revisit: re-entering Other prepopulates editor with previous text", 
 	// For the test, just verify the flow doesn't crash and Other is highlighted
 	const lines = component.render(80).join("\n");
 	assert.match(lines, /q\?/); // question still visible
+});
+
+test("frame keeps the requested width", () => {
+	const { lines } = render([{
+		header: "Frame",
+		question: "Does the border line up?",
+		type: "select_one",
+		options: [{ label: "A" }],
+	}], 40);
+	for (const line of lines) {
+		assert.equal(line.length, 40, `expected exact width 40, got ${line.length}: ${line}`);
+	}
+});
+
+test("inline Other draft wraps inside the frame", () => {
+	const { component } = drive([{
+		header: "Tags",
+		question: "Which categories?",
+		type: "select_many",
+		options: [{ label: "bug" }],
+	}]);
+	component.handleInput("\x1b[B"); // Other
+	for (const ch of "averyveryveryveryverylongcustomtagvalue") component.handleInput(ch);
+	const lines = component.render(24);
+	for (const line of lines) {
+		assert.ok(line.length <= 24, `line overflowed frame width: ${line}`);
+	}
 });
 
 test("`o` key records a browser open attempt (slice 5+ will hook up xdg-open)", () => {
