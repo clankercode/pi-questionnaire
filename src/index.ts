@@ -173,13 +173,16 @@ export default function (pi: ExtensionAPI) {
 
 			// 5. Interactive TUI
 			const factory = buildQuestionnaireComponent({ questions });
-			const result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) =>
-				factory(tui, theme, kb, done),
-			);
-
-			// TUI settled — release the heartbeat + delayed-notification
-			// timer before any return. Safe to call twice.
-			sideEffects.clear();
+			let result: TuiResult | undefined;
+			try {
+				result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) =>
+					factory(tui, theme, kb, done),
+				);
+			} finally {
+				// Release the heartbeat + delayed-notification timer even if
+				// the TUI throws or the session aborts mid-render.
+				sideEffects.clear();
+			}
 
 			if (!result || result.lifecycle === "cancelled") {
 				return {
