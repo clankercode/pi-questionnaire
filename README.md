@@ -1,8 +1,21 @@
 # pi-questionnaire
 
-Rich, flexible questionnaire tool for the [pi](https://github.com/earendil-works/pi-mono) coding agent.
+Claude Code-compatible `AskUserQuestion` tool for the [pi](https://github.com/earendil-works/pi-mono) coding agent.
 
-`ask_user` is a single tool that supports five question types — `single_select`, `multi_select`, `text`, `confirm`, and `number` — with rich option previews (markdown / mermaid / svg / code), per-question descriptions, defaults, and a tabbed UI for multi-question forms. The output is a canonical answer map (`{"0": "Staging", "1": ["A", "B"], ...}`) compatible with the [pag-server v2 questionnaire contract](https://github.com/clankercode/pag-server).
+Replaces v1's `ask_user` with the same shape Claude Code uses — five question types, per-question notes, persistent checkmarks, rich previews, a typed-confirmation "danger" flow for destructive actions, and per-setting side effects (BEL, desktop notification, TTS, custom command, idle heartbeat, browser-intent log) wired through a 13-field settings module.
+
+## What it is
+
+A single tool, registered as `AskUserQuestion`, that:
+
+- Asks 1–4 questions per call.
+- Returns a canonical, stringified-indexed answer map: `{ "0": {...}, "1": [...] }`.
+- Supports `select_one`, `select_many`, `confirm_enum`, `number`, `free_text`.
+- Auto-appends a synthetic **Other** option to every choice-based question so the user is never trapped.
+- Lets the user attach **notes** per question (independent of the answer).
+- Plays a terminal **bell** and prefixes the terminal **title** with 🔔 on mount.
+- Runs a live **duration timer** in the status line while the questionnaire is on screen.
+- Honors a per-question `is_dangerous` flag, gated by the `dangerCheckEnabled` setting, that forces the user to type an explicit confirmation before a destructive action is accepted.
 
 ## Install
 
@@ -11,14 +24,9 @@ Rich, flexible questionnaire tool for the [pi](https://github.com/earendil-works
 pi install .
 ```
 
-This will:
+This symlinks `src/index.ts` into your global `~/.pi/agent/extensions/` and installs dependencies via pnpm. Restart pi (or `/reload`) to pick up the extension.
 
-1. Symlink `src/index.ts` into your global `~/.pi/agent/extensions/`
-2. Install npm dependencies via pnpm
-
-Restart pi (or `/reload`) to pick up the new extension.
-
-### Manual install (without `pi install`)
+### Manual install
 
 ```bash
 pnpm install
@@ -26,143 +34,160 @@ pnpm install
 #   /absolute/path/to/pi-questionnarie/src/index.ts
 ```
 
-## Usage
+## Quick start
 
-Ask the LLM to use the `ask_user` tool. For example:
+Ask the LLM to use the `AskUserQuestion` tool. For example:
 
-> "Use the ask_user tool to ask me which environment to deploy to. Give me options: staging, production, or canary. Then deploy to whichever I pick."
+> "Use AskUserQuestion to ask me which environment to deploy to, with options staging, production, or canary. Then deploy to whichever I pick."
 
 The model will call:
 
 ```json
 {
   "questions": [{
-    "id": "env",
     "header": "Env",
     "question": "Which environment should we deploy to?",
-    "type": "single_select",
+    "type": "select_one",
     "options": [
-      { "label": "staging", "description": "Validate safely" },
+      { "label": "staging",  "description": "Validate safely" },
       { "label": "production", "description": "Ship it" },
-      { "label": "canary", "description": "1% of traffic" }
+      { "label": "canary",   "description": "1% of traffic" }
     ]
   }]
 }
 ```
 
-The user picks from the TUI (or the answers come from `PI_QUESTIONNAIRE_ANSWERS_FILE` in headless mode — see below), and the model receives a structured result.
+The user picks from the TUI and the model receives a canonical answer map.
 
-### Question types
+## Required fields
 
-| Type            | UI                                | Output value     | Notes                              |
-|-----------------|-----------------------------------|------------------|------------------------------------|
-| `single_select` | list, ↑↓ + Enter                  | chosen label     | up to 8 options; "Other" auto-added |
-| `multi_select`  | checkbox list, Space to toggle    | array of labels  | up to 8 options                    |
-| `text`          | inline editor                     | string           | single-line or multiline           |
-| `confirm`       | Yes / No                          | boolean          | always 2 options                   |
-| `number`        | inline editor with ↑↓ nudging     | number           | honors min / max                   |
+Every question must include `header`, `question`, and `type`. Choice questions (`select_one`, `select_many`, `confirm_enum`) must also include `options` — except `confirm_enum`, which auto-fills `[{Affirm},{Decline}]` when `options` is omitted.
 
-### Rich previews
+## The 5 question types
 
-Each option can carry a `preview` for code samples, diagrams, or specs:
+| Type            | UI                                              | Output value                                       | Notes                                       |
+|-----------------|-------------------------------------------------|----------------------------------------------------|---------------------------------------------|
+| `select_one`    | list, ↑↓ + Enter                                | `{mode:"option",value}` or `{mode:"other",text}`   | up to 7 user options + auto `Other` = 8     |
+| `select_many`   | checkbox list + `[Select]` button               | `[{mode:"option",value} \| {mode:"other",text},…]` | Space to toggle, Enter on `[Select]` commits |
+| `confirm_enum`  | list (Affirm / Decline / Other)                 | `{mode:"option",value:"affirm"\|"decline"}` or `other` | Default options if `options` omitted       |
+| `number`        | editor + ↑/↓ nudge                              | `number`                                           | honors `min` / `max`                        |
+| `free_text`     | multiline editor (always)                       | `string`                                           | `multiline` defaults to `true`              |
 
-```json
-{
-  "label": "Streaming",
-  "description": "Server-sent events",
-  "preview": {
-    "type": "mermaid",
-    "content": "sequenceDiagram\n  C->>S: GET /events\n  S-->>C: data: {...}"
-  }
-}
-```
+## The auto-appended "Other" option
 
-Supported preview types: `markdown`, `mermaid`, `svg`, `code`. (v1: previews are rendered as plain text; mermaid/svg marked as "[mermaid]" in the TUI.)
+Every choice-based question gets a synthetic **Other** option that opens a free-text editor. User-provided options are capped at **7**, so the post-Other total is **8 max**. The Other option is never counted against user uniqueness checks, and is case-insensitive on label match (so `other`, `Other`, `OTHER` all collapse to the same slot).
 
-### Max 4 questions per call
+## `is_dangerous` flag
 
-Each `ask_user` invocation accepts 1 to 4 questions. For longer forms, break them into multiple `ask_user` calls.
-
-### pag-server v1 / v2 compatibility
-
-The tool accepts the older pag-server shapes too:
-
-```json
-// v1: { question, options, multi_select: true }
-{ "question": "Pick toppings?", "options": [...], "multi_select": true }
-
-// v2: { question, input_mode, options, header }
-{ "question": "Where?", "input_mode": "single_select", "header": "Where", "options": [...] }
-```
-
-## Headless mode (for scripts & e2e)
-
-Set `PI_QUESTIONNAIRE_ANSWERS_FILE=/path/to/answers.json` and the tool will skip the TUI and load the canonical answer map from that file. This makes the tool fully scriptable for CI / e2e tests.
+Mark a question as destructive:
 
 ```json
 {
-  "0": "Staging",
-  "1": ["A", "B"],
-  "2": "free text",
-  "3": true,
-  "4": 42
+  "header": "Wipe DB",
+  "question": "Drop the prod database?",
+  "type": "confirm_enum",
+  "is_dangerous": true
 }
 ```
 
-Supported envelope shapes: the canonical flat map, pag-server's `{answers, notes}` envelope, and pag-server's `{question_response: {answers}}` envelope. Per-question `{selected, other}` nested shapes are also accepted.
+The TUI then renders a `⚠️  DESTRUCTIVE` header and forces the user to type a confirmation string before the answer is accepted. Esc cancels the whole questionnaire (no partial commit). The behavior is gated by the `dangerCheckEnabled` setting so trusted environments can disable it. See [docs/USAGE.md](docs/USAGE.md#is_dangerous-confirmation) for the full flow.
 
-If the file is missing, unreadable, or contains invalid answers, the tool returns an error (not cancellation) so the LLM can recover.
+## Notes per question
 
-## Architecture
+Press `Tab` (or `n`) on a question to swap to a notes editor. Notes are independent of the answer, so you can annotate an answered question, a multi-select, or a danger flow. On submit, notes flow back to the model under the same `notes` key in the tool result.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design rationale and module breakdown. See [docs/USAGE.md](docs/USAGE.md) for richer examples.
+## Settings (13 fields, grouped)
+
+Configured via `<agentDir>/ask-user-question.json` (global) and/or `<cwd>/.pi/ask-user-question.json` (project). Project overrides global. Defaults from `src/settings.ts`:
+
+| Group        | Field                       | Default | What it does                                         |
+|--------------|-----------------------------|---------|------------------------------------------------------|
+| **Browser**  | `browserEnabled`            | `true`  | Start the HTTP server alongside the TUI *(slice 5+)* |
+|              | `browserAutoOpen`           | `false` | Auto-open the browser when ≥ `browserMinQuestions`   |
+|              | `browserMinQuestions`       | `2`     | Threshold for auto-open (1–4)                        |
+|              | `copyUrlToClipboard`        | `true`  | Copy the URL to the clipboard when generated         |
+| **Audio/UX** | `bellOnQuestion`            | `true`  | Audible BEL on mount                                 |
+|              | `notificationOnQuestion`    | `false` | Desktop notification on mount                        |
+|              | `notificationDelaySeconds`  | `30`    | Delay before notification fires (0–300)              |
+|              | `ttsOnQuestion`             | `false` | Speak the header via `attn` on mount                 |
+|              | `onQuestionCommand`         | `""`    | Shell command to run on mount (gets payload via env) |
+| **Heartbeat**| `heartbeatWhileActive`      | `false` | Send a keepalive heartbeat while the TUI is on screen |
+|              | `heartbeatIntervalMinutes`  | `4.5`   | Idle interval in minutes (0.5–60)                    |
+| **Input**    | `debounceMs`                | `300`   | Debounce (ms) when typing into number/free_text      |
+| **Safety**   | `dangerCheckEnabled`        | `true`  | Enforce the `is_dangerous` typed-confirmation flow   |
+
+Full reference (types, ranges, behavior): [docs/USAGE.md#settings-reference](docs/USAGE.md#settings-reference).
+
+The settings menu is available via the menu command in pi (slash name will land with the menu UI in a separate slice — see `docs/USAGE.md` for now). Until then, hand-edit the JSON files.
+
+## Keymap
+
+| Key            | Action                                                       |
+|----------------|--------------------------------------------------------------|
+| `↑` / `↓`      | Navigate options; nudge value on `number`                    |
+| `Enter`        | Select / commit / submit                                     |
+| `Space`        | Toggle option (`select_many`)                                |
+| `Tab` / `n`    | Swap to notes editor (or back)                               |
+| `1`–`9`        | Select option index (choice questions)                       |
+| `Meta+1`–`Meta+4` | Jump to question N (multi-question). Meta = Alt / Option |
+| `[` / `]`      | Previous / next question tab                                 |
+| `0`            | Jump to Submit tab                                           |
+| `e`            | Toggle preview expansion for current option                  |
+| `o`            | Open browser URL *(slice 5+)*                                |
+| `?`            | Help overlay (lists all shortcuts)                           |
+| `Esc`          | Cancel (or back from notes)                                  |
+
+## Migration from v1
+
+The tool name changed (`ask_user` → `AskUserQuestion`), the schema changed (5 new types, no aliases, no `required`), and headless mode was removed. See the [v1 → v2 mapping table in docs/USAGE.md](docs/USAGE.md#migration-from-v1) for the full before/after.
+
+## Architecture & usage
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, data flow, TUI state machine, side effects wiring.
+- [docs/USAGE.md](docs/USAGE.md) — full schema reference, per-type examples, previews, notes, settings reference, behavior flags.
 
 ## Development
 
 ### Tests
 
 ```bash
-# Python unit tests (47 cases for schema, normalize, answers, headless)
+# Python unit/integration tests (schema, normalize, answers, side effects)
 pnpm test:py
 
-# TUI render snapshots (9 cases via node --test)
-npx tsx --test tests/test_tui_render.mjs
+# Node tests (TUI render snapshots, settings module, helpers)
+pnpm test
 
-# Full e2e (6 scenarios via tmux + pi --print, ~5 min)
+# Full e2e — currently a SKIP no-op; the real e2e lands with the browser path
 bash tests/test_e2e_pi.sh
 
 # All of the above
 pnpm test:all
 ```
 
-The e2e script uses `minimax/MiniMax-M2.7-highspeed` by default. Override with `PROVIDER=...` and `MODEL=...` env vars. See [tests/MODEL_NOTES.md](tests/MODEL_NOTES.md) for what works.
-
 ### Repo layout
 
 ```
 src/
-  index.ts          # extension entry; registers ask_user
-  schema.ts         # typebox schemas + semantic validation
-  normalize.ts      # canonical v2 question normalization
-  answers.ts        # answer parsing + validation
-  tui.ts            # rich tabbed TUI component (all 5 types)
-  headless.ts       # env-var-driven answer loading
-  types.ts          # shared types
+  index.ts          # extension entry; registers AskUserQuestion
+  schema.ts         # typebox schema + semantic validation
+  normalize.ts      # canonical v2 normalization (Other injection, confirm_enum defaults)
+  types.ts          # canonical types + constants (MAX_*, label names)
+  answers.ts        # answer payload coercion/validation
+  tui.ts            # rich TUI (notes, checkmarks, danger flow, preview, help)
+  settings.ts       # 13-field settings persistence (global + project merge)
+  side-effects.ts   # on-question side effects (notification, TTS, command, heartbeat)
 tests/
-  harness.ts        # TS CLI that the pytest suite drives
+  harness.ts        # TS CLI that drives the pytest suite
   conftest.py       # pytest fixtures
-  test_schema.py    # 10 cases
-  test_normalize.py # 11 cases
-  test_answers.py   # 18 cases
-  test_headless.py  # 8 cases
-  test_tui_render.mjs  # 15 cases
-  test_e2e_pi.sh    # 6 e2e scenarios via pi --print
-  MODEL_NOTES.md    # which models work for e2e
+  test_schema.py    # 26 cases
+  test_normalize.py # 29 cases
+  test_answers.py   # 25 cases
+  test_side_effects.py # 31 cases
+  test_tui_render.mjs # 50 cases
+  test_e2e_pi.sh    # currently SKIP (full e2e lands with browser path)
 docs/
   ARCHITECTURE.md
   USAGE.md
-PLAN.md             # original plan
-pirfl-log.md        # PIRFL work log
 ```
 
 ## License
