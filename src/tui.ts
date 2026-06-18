@@ -259,12 +259,19 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		const terminalWriter: (s: string) => void = opts.terminalWriter ?? ((s) => process.stdout.write(s));
 
 		// Prefix the terminal title with a bell so the user notices the
-		// questionnaire is waiting. Restored (cleared) on done.
+		// questionnaire is waiting. Restored (cleared) on done. The
+		// title is also re-set on every duration tick (below) so we
+		// outpace any other title updater that might overwrite it
+		// (e.g. pi-idle-time or pi core's own lifecycle signals).
 		const firstHeader = questions[0]?.header ?? "Question";
-		setTerminalTitle(`🔔 AskUserQuestion — ${firstHeader}`, terminalWriter);
-		// Audible terminal bell (gated by bellOnQuestion setting, default on).
-		// Independent of the title signal — title is visual, BEL is audio.
-		playBell(terminalWriter);
+		const titleText = `🔔 AskUserQuestion — ${firstHeader}`;
+		setTerminalTitle(titleText, terminalWriter);
+		// Audible terminal bell fires on the FIRST render, not on mount,
+		// so it only rings once the TUI is actually visible to the
+		// user. If the user has already started typing by the time the
+		// first render fires, the bell still rings — but the user
+		// shouldn't be able to press a key before the TUI is rendered.
+		let bellRung = false;
 		let currentTab = 0;
 		let optionIndex = 0;
 		const checked: Record<string, Set<number>> = {};
@@ -291,11 +298,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		// Duration timer: track when the questionnaire was asked, refresh
 		// the render once per second so the "elapsed" line updates.
+		// Also re-sets the terminal title every tick so it stays
+		// visible even if something else (e.g. another extension) is
+		// updating the title concurrently.
 		// unref() so the interval doesn't keep Node alive (esp. in tests).
 		const askedAt = Date.now();
 		let durationTimer: ReturnType<typeof setInterval> | null = null;
 		if (typeof setInterval === "function") {
 			durationTimer = setInterval(() => {
+				setTerminalTitle(titleText, terminalWriter);
 				tui.requestRender();
 			}, 1000);
 			// Node: don't keep the process alive. (No-op in non-Node runtimes.)
@@ -1005,6 +1016,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
 			if (browser) {
 				lines.push(theme.fg("muted", `🌐 ${browser} (press o to open)`));
+			} else {
+				// Placeholder for slice 5+ (HTTP+WebSocket browser sync).
+				// Shown dimmed so the user knows the line is reserved
+				// for a future feature, not just missing.
+				lines.push(theme.fg("dim", "🌐 browser sync — slice 5+ (not yet available)"));
 			}
 			if (noteIndicator) {
 				lines.push(theme.fg("muted", `Note: ${note}`));
@@ -1012,6 +1028,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		}
 
 		function render(width: number): string[] {
+			// Audible bell on the first render — by this point the TUI
+			// is visible to the user, so the bell won't ring while
+			// they're still reading the previous tool's output. Fires
+			// at most once per mount.
+			if (!bellRung) {
+				bellRung = true;
+				playBell(terminalWriter);
+			}
 			// Keep the inputMode in sync with the active question. Done at
 			// the top of render() so any tab change (or the first mount)
 			// drives the editor into the right state without every callsite

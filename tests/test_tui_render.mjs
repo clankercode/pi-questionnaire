@@ -899,6 +899,9 @@ test("TUI mount writes a BEL when bellOnQuestion is true (default)", () => {
 		terminalWriter: writer,
 	});
 	const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+	// The bell fires on the FIRST render, not on mount (so it only
+	// rings once the TUI is actually visible to the user).
+	c.render(80);
 	// Exactly one standalone BEL (no title prefix, just \x07 by itself).
 	const bareBel = writes.filter((w) => w === "\x07");
 	assert.equal(bareBel.length, 1, `expected exactly 1 BEL, got ${bareBel.length}; writes=${JSON.stringify(writes)}`);
@@ -921,6 +924,9 @@ test("TUI mount writes NO BEL when bellOnQuestion is false (in-memory override)"
 			terminalWriter: writer,
 		});
 		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		// Render to trigger the first-render bell check. With
+		// bellOnQuestion=false, no BEL is written.
+		c.render(80);
 		const bareBel = writes.filter((w) => w === "\x07");
 		assert.equal(bareBel.length, 0, `expected no BEL; writes=${JSON.stringify(writes)}`);
 		// Title prefix still fires (independent signal).
@@ -950,6 +956,9 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			terminalWriter: writer,
 		});
 		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		// Render first to fire the mount bell (fires on first render,
+		// not on mount).
+		c.render(80);
 		c.handleInput("\r"); // single-question: Enter triggers commitAndAdvance → submit()
 		const bareBel = writes.filter((w) => w === "\x07");
 		assert.equal(
@@ -977,6 +986,8 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			terminalWriter: writer,
 		});
 		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		// Render first to fire the mount bell.
+		c.render(80);
 		c.handleInput("\x1b"); // Escape triggers cancel()
 		const bareBel = writes.filter((w) => w === "\x07");
 		assert.equal(
@@ -1003,10 +1014,12 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			terminalWriter: writer,
 		});
 		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		// Render first to fire the mount bell.
+		c.render(80);
 		c.dispose();
 		c.dispose(); // safe to call twice
 		const bareBel = writes.filter((w) => w === "\x07");
-		assert.equal(bareBel.length, 1, "dispose path: bell fires exactly once on mount");
+		assert.equal(bareBel.length, 1, "dispose path: bell fires exactly once on first render");
 	}
 });
 
