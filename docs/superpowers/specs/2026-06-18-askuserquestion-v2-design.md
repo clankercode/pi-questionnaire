@@ -211,8 +211,9 @@ Preview is **collapsed by default**. `e` toggles expansion. Expanded preview sho
 | `e` | Toggle preview expansion (current question) |
 | `o` | Open current question's browser URL (spawns `xdg-open` / `open` / `start`) |
 | `n` | Swap to notes editor (alternative to Tab) |
-| `1`-`4` | Jump to question N (multi-question) |
-| `0` | Jump to Submit tab |
+| `1`–`9` | On a choice question (`select_one` / `select_many` / `confirm_enum`): select / toggle the option at that index (clamped to `options.length` minus 1 to account for the auto-`Other`). On `number` / `free_text`: no-op (digits belong to the editor). |
+| `Meta+1`–`Meta+4` | Jump to question N (multi-question). `Meta` is the platform-specific modifier: `Alt` on Linux/Windows, `Option` on macOS. If the terminal does not deliver `Meta` reliably, use `[` / `]` or `Ctrl+1`–`Ctrl+4` as documented fallbacks. |
+| `0` | Jump to Submit tab (multi-question) |
 | `[` / `]` | Previous / next question tab |
 | `?` | Show help overlay (lists all shortcuts) |
 
