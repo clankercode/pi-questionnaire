@@ -1188,15 +1188,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						}
 					}
 				}
-				// Inline editor for Other. The host doesn't render the
-				// editor for inputMode === "other" (same as for
-				// "danger"), so we inline it. Gives the user full
-				// pi-tui text input mechanics (word delete, history,
-				// multi-line, etc.) instead of a stripped-down custom
-				// text input.
+				// Inline editor for Other. The pi-tui Editor captures all
+				// input (word delete, history, multi-line, etc.) via
+				// editor.handleInput() — we just display its current text
+				// as a compact one-liner below the Other option. Rendering
+				// the full editor chrome (3-4 lines of box-drawing) would
+				// be too tall for a single-line "type a custom answer"
+				// field. The editor's text buffer stays in sync; a cursor
+				// block is appended to show where input will go.
 				if (inputMode === "other" && inputQuestionId === q.id) {
-					lines.push("");
-					lines.push(...editor.render(contentWidth));
+					const draft = editor.getText();
+					const cursor = theme.fg("accent", "▏");
+					const value = draft.length === 0
+						? theme.fg("dim", "(type a custom answer)")
+						: theme.fg("accent", draft);
+					lines.push(
+						`     ${theme.fg("muted", "Other:")} ${value}${cursor}`,
+					);
 				}
 				// [Select] button for multi_select (commits the array)
 				if (q.type === "select_many") {
