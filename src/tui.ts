@@ -337,9 +337,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function reconcileMode() {
 			const q = currentQuestion();
 			if (!q) {
-				// On Submit tab or invalid: drop out of danger mode only if
-				// we were in it. Other inputModes are user-driven and stay.
-				if (inputMode === "danger") {
+				// On Submit tab or invalid: drop out of any editor mode
+				// tied to a specific question. Other inputModes are
+				// user-driven and stay.
+				if (inputMode === "danger" || inputMode === "free_text" || inputMode === "number") {
 					inputMode = null;
 					inputQuestionId = null;
 					editor.setText("");
@@ -358,8 +359,39 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				return;
 			}
-			// Non-danger question: leave danger mode if we were in it.
-			if (inputMode === "danger") {
+			// Auto-open the editor for text-input question types so the
+			// user can start typing immediately after tabbing to them.
+			// Without this, keystrokes fall through to global handlers
+			// (e.g. 'n' opens notes instead of being typed).
+			if (q.type === "free_text") {
+				if (inputMode !== "free_text" || inputQuestionId !== q.id) {
+					inputMode = "free_text";
+					inputQuestionId = q.id;
+					// Pre-fill editor with previous answer on revisit; fall
+					// back to the question's placeholder (if any) as a
+					// visible hint the user can edit or clear. If neither
+					// is set, leave the editor empty.
+					const prev = answers.get(q.id)?.value;
+					const initial = typeof prev === "string" && prev.length > 0
+						? prev
+						: (typeof q.placeholder === "string" ? q.placeholder : "");
+					editor.setText(initial);
+				}
+				return;
+			}
+			if (q.type === "number") {
+				if (inputMode !== "number" || inputQuestionId !== q.id) {
+					inputMode = "number";
+					inputQuestionId = q.id;
+					const prev = answers.get(q.id)?.value;
+					editor.setText(typeof prev === "string" ? prev : "");
+				}
+				return;
+			}
+			// Non-text-input question (select_one/select_many/confirm_enum):
+			// close the editor if we were in one. The user navigates with
+			// Up/Down and toggles with Space/Enter.
+			if (inputMode === "danger" || inputMode === "free_text" || inputMode === "number") {
 				inputMode = null;
 				inputQuestionId = null;
 				editor.setText("");
@@ -733,6 +765,35 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					inputQuestionId = null;
 					editor.setText("");
 					otherHandled = true;
+				}
+				// For "free_text" and "number" modes, nav keys ([, ], 0,
+				// Left/Right, Meta+1-4) must close the editor and fall
+				// through to the multi-question tab-nav handlers. Without
+				// this, pressing ] on a free_text question would type ']'
+				// into the editor instead of advancing to the next tab.
+				// Non-empty in-progress text is committed as the answer
+				// for the current question (matches Enter behavior).
+				if (inputMode === "free_text" || inputMode === "number") {
+					const isMetaJump = data.startsWith("\x1b") && data.length >= 2
+						&& data[1] >= "1" && data[1] <= "4";
+					const isNavKey = data === "[" || data === "]" || data === "0"
+						|| data === "\x1b[D" || data === "\x1b[C" || isMetaJump;
+					if (isNavKey && isMulti) {
+						const currentQ = currentQuestion();
+						if (currentQ && editor.getText().trim() !== "") {
+							const text = editor.getText();
+							if (inputMode === "number") {
+								const n = coerceNumber(text, currentQ);
+								if (n !== undefined) saveAnswer(currentQ, n);
+							} else {
+								saveAnswer(currentQ, text);
+							}
+						}
+						inputMode = null;
+						inputQuestionId = null;
+						editor.setText("");
+						otherHandled = true;
+					}
 				}
 				if (inputMode === "number" && matchesKey(data, Key.up)) {
 					const cur = Number(editor.getText() || "0");
@@ -1256,14 +1317,21 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			} else if (q.type === "free_text") {
 				const isEditing = inputMode === "free_text" && inputQuestionId === q.id;
 				if (isEditing) {
-					lines.push(theme.fg("muted", "(typing — Enter saves this answer)"));
-					if (q.placeholder) {
-						lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
-					}
+					// Compact one-liner editor display — same pattern as
+					// the Other editor. The pi-tui Editor captures all
+					// input mechanics (word delete, history, multi-line)
+					// in the background; we just display its current text
+					// inline. Empty state shows the placeholder (preloaded
+					// by reconcileMode) as a dim hint.
+					const draft = editor.getText();
+					const cursor = theme.fg("accent", "▏");
+					const value = draft.length === 0
+						? theme.fg("dim", "(type your answer)")
+						: theme.fg("accent", draft);
 					lines.push("");
-					lines.push(...editor.render(contentWidth));
+					lines.push(`     ${theme.fg("muted", "Answer:")} ${value}${cursor}`);
 				} else {
-					lines.push(theme.fg("muted", "(Enter to start typing — multiline)"));
+					lines.push(theme.fg("muted", "(type your answer — Enter saves)"));
 					if (q.placeholder) {
 						lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
 					}

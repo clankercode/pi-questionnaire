@@ -136,7 +136,7 @@ test("number question shows range", () => {
 	assert.match(joined, /Range: 1 … 10/);
 });
 
-test("free_text shows multiline hint", () => {
+test("free_text opens editor immediately on render", () => {
 	const { lines } = render([{
 		header: "Note",
 		question: "Anything to add?",
@@ -145,8 +145,12 @@ test("free_text shows multiline hint", () => {
 	}]);
 	const joined = lines.join("\n");
 	assert.match(joined, /Anything to add\?/);
-	assert.match(joined, /multiline/);
+	// The editor opens immediately for free_text questions so the
+	// user can start typing without an extra Enter. The placeholder
+	// is preloaded as the initial text (so the user can edit/clear
+	// it) and a cursor block is rendered to show where input will go.
 	assert.match(joined, /Optional/);
+	assert.match(joined, /\u258f/); // cursor block
 });
 
 test("multi question renders tab bar", () => {
@@ -550,13 +554,19 @@ test("notes Tab saves and cycles to the next question tab", () => {
 	assert.match(lines, /Note: side note/);
 });
 
-test("`n` key is the notes-toggle fallback", () => {
+test("`n` key is typed into the free_text editor (not notes toggle)", () => {
+	// Regression test: previously pressing 'n' on a free_text
+	// question opened the notes overlay instead of typing 'n' into
+	// the editor. The editor now opens immediately on render, so
+	// printable characters go to the editor.
 	const { component } = drive([{
 		header: "h", question: "q?", type: "free_text",
 	}]);
 	component.handleInput("n");
 	const lines = component.render(80).join("\n");
-	assert.match(lines, /Notes for "h"/);
+	// 'n' should appear in the editor area, not in the notes view.
+	assert.match(lines, /\bn\b/);
+	assert.doesNotMatch(lines, /Notes for "h"/);
 });
 
 test("? key shows the help overlay", () => {
@@ -1297,11 +1307,12 @@ test("Submit tab: Enter submits all answers when every question is answered", ()
 		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
 	];
 	const { component, getDone } = drive(questions);
-	component.handleInput("\r"); // open free_text editor
+	// free_text editor opens immediately on render — no need to
+	// press Enter first. Just type and commit.
 	for (const ch of "hello world") component.handleInput(ch);
 	let lines = component.render(80).join("\n");
 	assert.match(lines, /hello world/, "typed free_text should be visible while editing");
-	component.handleInput("\r"); // commit free_text
+	component.handleInput("\r"); // commit free_text → advance to Tags
 	component.handleInput(" "); // toggle bug
 	component.handleInput("0"); // jump to Submit tab
 	component.handleInput("\r"); // submit all answers
