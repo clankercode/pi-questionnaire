@@ -129,18 +129,20 @@ export function validateSemantics(input: AskUserInput): Validation<AskUserInput>
 }
 
 export function resolveType(
-	explicit: string | undefined,
-	inputMode: string | undefined,
+	explicit: string | undefined | null,
+	inputMode: string | undefined | null,
 	legacyMulti: boolean,
 	_options: unknown,
 ): QuestionType | "invalid" {
-	if (explicit === "single_select" || inputMode === "single_select") return "single_select";
-	if (explicit === "multi_select" || inputMode === "multi_select") return "multi_select";
-	if (explicit === "text" || inputMode === "text") return "text";
-	if (explicit === "confirm") return "confirm";
-	if (explicit === "number") return "number";
+	const e = explicit ?? undefined;
+	const im = inputMode ?? undefined;
+	if (e === "single_select" || im === "single_select") return "single_select";
+	if (e === "multi_select" || im === "multi_select") return "multi_select";
+	if (e === "text" || im === "text") return "text";
+	if (e === "confirm") return "confirm";
+	if (e === "number") return "number";
 	// Legacy / untyped
-	if (inputMode === undefined && explicit === undefined) {
+	if (im === undefined && e === undefined) {
 		if (legacyMulti) return "multi_select";
 		// No type info: default to text (most flexible)
 		return "text";
