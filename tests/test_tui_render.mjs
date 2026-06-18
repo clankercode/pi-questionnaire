@@ -1182,13 +1182,44 @@ test("is_dangerous: typed text is echoed in the rendered output", () => {
 	}
 });
 
+test("is_dangerous: warning view replaces the normal header instead of duplicating it", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const questions = [{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}];
+		const { component } = drive(questions);
+		const lines = component.render(80);
+		// With the visual frame, lines[0] is the top border — skip past
+		// it to find the first content line.
+		const firstContent = lines.find((l) => !l.startsWith("┌") && !l.startsWith("└") && !l.startsWith("│") || l.includes("⚠️") || l.includes("DESTRUCTIVE"));
+		assert.match(
+			firstContent ?? "",
+			/⚠️  DESTRUCTIVE — Drop/,
+			"first content line should be the destructive header",
+		);
+		// The question text should appear exactly once (the danger branch
+		// replaces, not duplicates, the normal header rendering).
+		const occurrences = lines.filter((l) => l.includes("Drop the database?")).length;
+		assert.equal(
+			occurrences,
+			1,
+			"danger prompt should appear exactly once",
+		);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
 // ---------------------------------------------------------------------------
-// Regression: multi_select Other used to toggle "Other" as a regular option
-// instead of opening the editor to capture custom text. Now: Enter/Space/
-// 1-9 on Other opens the editor; committing typed text adds a
-// {mode:"other", text} entry to the array.
+// Regression: multi_select Other is now an inline text input (no
+// modal). Cursor on Other -> printable chars append to the inline
+// text, Backspace deletes, Enter commits as {mode:"other", text}.
 // ---------------------------------------------------------------------------
-test("multi_select Other: Enter on Other opens the editor and commits typed text as {mode:other}", () => {
+test("multi_select Other: inline text input — typing and Enter commits as {mode:other}", () => {
 	const questions = [{
 		header: "Tags",
 		question: "Which categories?",
@@ -1205,15 +1236,19 @@ test("multi_select Other: Enter on Other opens the editor and commits typed text
 	// Move down to Other (option index 2: bug=0, feature=1, Other=2)
 	component.handleInput("\x1b[B"); // down
 	component.handleInput("\x1b[B"); // down → Other
-	// Enter on Other opens the editor
-	component.handleInput("\r");
-	// Editor should be empty
-	assert.equal(component.getEditorText(), "", "editor opens empty");
-	// Type custom text
+	// Now Other is highlighted. Print characters go directly into the
+	// inline text input — no Enter-to-open step.
 	for (const ch of "needs-investigation") {
 		component.handleInput(ch);
 	}
-	// Enter commits
+	// Render so we can verify the inline text input shows the draft.
+	const draftLines = component.render(80).join("\n");
+	assert.match(
+		draftLines,
+		/needs-investigation/,
+		"typed text should appear in the rendered output",
+	);
+	// Enter commits and submits (single-question auto-submits).
 	component.handleInput("\r");
 	const v = getDone();
 	assert.ok(v !== null, "Enter on Other must commit and submit (single question)");
@@ -1232,33 +1267,100 @@ test("multi_select Other: Enter on Other opens the editor and commits typed text
 	}
 });
 
-test("multi_select Other: revisit prepopulates the editor with the previous Other text", () => {
-	// For revisit, we need a multi-question setup so the user can navigate
-	// back to the select_many after committing. Two questions: a regular
-	// select_one followed by the multi_select with Other.
+test("multi_select Other: empty Enter on Other is a no-op (no commit)", () => {
+	const questions = [{
+		header: "Tags",
+		question: "Which categories?",
+		type: "select_many",
+		options: [{ label: "bug" }],
+	}];
+	const { component, getDone } = drive(questions);
+	// Navigate to Other (idx 1)
+	component.handleInput("\x1b[B");
+	// Press Enter with empty text — should NOT commit.
+	component.handleInput("\r");
+	assert.equal(
+		getDone(),
+		null,
+		"empty Enter on Other should be a no-op, not submit",
+	);
+});
+
+test("multi_select Other: revisit shows previous Other text", () => {
+	// Two questions so we can navigate from Submit back to the
+	// multi_select via `[`.
 	const questions = [
 		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
 		{ header: "Tags", question: "Which categories?", type: "select_many", options: [{ label: "bug" }] },
 	];
-	const { component, getDone } = drive(questions);
+	const { component } = drive(questions);
 	// First question: pick A
-	component.handleInput("1"); // A → commits and advances
-	// Second question (select_many): go to Other, type, commit
+	component.handleInput("1"); // advances
+	// Second question: navigate to Other, type, commit
 	component.handleInput("\x1b[B"); // down → Other
-	component.handleInput("\r"); // open editor
 	for (const ch of "first") component.handleInput(ch);
 	component.handleInput("\r"); // commit
-	// Now on Submit tab. Press `[` to navigate back to the multi_select.
-	// (Regression test: `[` on Submit must work — previously the early
-	// return for non-Enter/Esc keys on Submit blocked navigation.)
+	// Navigate from Submit tab back to the multi_select.
 	component.handleInput("[");
-	// Now back on the multi_select. Re-enter Other and check pre-fill.
-	component.handleInput("\x1b[B"); // down → Other
-	component.handleInput("\r"); // open editor
-	assert.equal(
-		component.getEditorText(),
-		"first",
-		"editor pre-fills with previous Other text on revisit",
+	// Render: the inline text input should show "first" (prefilled from
+	// saved answer on first render of Other for this question).
+	const lines = component.render(80).join("\n");
+	assert.match(
+		lines,
+		/first/,
+		"inline Other text input should show prior answer on revisit",
 	);
-	// Don't commit; just abandon.
+});
+
+test("multi_select Other: Backspace deletes from inline text input", () => {
+	const questions = [{
+		header: "Tags",
+		question: "Which categories?",
+		type: "select_many",
+		options: [{ label: "bug" }],
+	}];
+	const { component } = drive(questions);
+	component.handleInput("\x1b[B"); // Other
+	for (const ch of "abc") component.handleInput(ch);
+	let draft = component.render(80).join("\n");
+	assert.match(draft, /abc/, "should show 'abc' after typing");
+	component.handleInput("\b"); // backspace
+	draft = component.render(80).join("\n");
+	assert.doesNotMatch(draft, /abc/, "should no longer show 'abc'");
+	assert.match(draft, /ab/, "should show 'ab' after one backspace");
+});
+
+test("multi_select Other: toggling a regular option preserves the existing Other entry", () => {
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{
+			header: "Tags",
+			question: "Which categories?",
+			type: "select_many",
+			options: [{ label: "bug" }, { label: "feature" }],
+		},
+	];
+	const { component, getDone } = drive(questions);
+	component.handleInput("1"); // q0 -> advance
+	component.handleInput("\x1b[B"); // feature
+	component.handleInput("\x1b[B"); // Other
+	for (const ch of "custom-tag") component.handleInput(ch);
+	component.handleInput("\r"); // commit Other -> Submit tab
+	component.handleInput("["); // back to select_many
+	component.handleInput("\x1b[B"); // feature
+	component.handleInput(" "); // toggle feature on
+	component.handleInput("0"); // submit tab
+	component.handleInput("\r"); // submit all
+	const v = getDone();
+	assert.ok(v !== null, "expected done() to be called");
+	if (v) {
+		const ans = v.answers.find((a) => a.id === "q2" || a.index === 1)?.value;
+		assert.ok(Array.isArray(ans), "select_many answer must stay an array");
+		if (Array.isArray(ans)) {
+			assert.deepEqual(ans, [
+				{ mode: "option", value: "feature" },
+				{ mode: "other", text: "custom-tag" },
+			]);
+		}
+	}
 });

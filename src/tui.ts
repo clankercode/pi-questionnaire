@@ -261,10 +261,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		const notes: Record<string, string> = {};
 		const answers = new Map<string, TuiAnswer>();
 		let viewMode: ViewMode = "answer";
-		let inputMode: "text" | "number" | "other" | "free_text" | "notes" | "danger" | null = null;
+		let inputMode: "text" | "number" | "free_text" | "notes" | "danger" | null = null;
 		let inputQuestionId: string | null = null;
 		let browserUrl: string | null = null;
 		let lastBrowserOpenAttempt: { url: string; at: number } | null = null;
+		// Per-question text input for the "Other" option on choice
+		// questions. The cursor "moves into" this text input when the
+		// user navigates to Other — no modal editor, no Enter-to-open.
+		const otherText: Record<string, string> = {};
 
 		const editorTheme: EditorTheme = {
 			borderColor: (s: string) => theme.fg("accent", s),
@@ -409,21 +413,20 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		// --- option selection ----------------------------------------------
 
-		/** Toggle a multi-select option (does NOT submit). */
+		/** Toggle a multi-select option (does NOT submit). Other is handled
+		 *  by the inline text input flow in handleInput — this function
+		 *  just moves the cursor onto Other when called with Other's
+		 *  index. Real-option toggles do their normal toggle dance. */
 		function toggleOption(idx: number, q: CanonicalQuestion) {
 			if (q.type !== "select_many") return;
 			const opts = getRenderOptions(q);
 			const opt = opts[idx];
 			if (!opt) return;
-			if (opt?.isOther) {
-				// Other on multi_select opens the editor so the user can type
-				// a custom value (committed as {mode:"other", text}). Same UX
-				// shape as select_one / confirm_enum's Other flow.
-				inputMode = "other";
-				inputQuestionId = q.id;
-				const prev = getOtherText(q, answers.get(q.id)?.value);
-				editor.setText(prev);
-				refresh();
+			if (opt.isOther) {
+				if (optionIndex !== idx) {
+					optionIndex = idx;
+					refresh();
+				}
 				return;
 			}
 			const set = checked[q.id] ?? new Set<number>();
@@ -455,8 +458,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function selectOption(idx: number, q: CanonicalQuestion) {
 			if (q.type === "select_many") {
-				// Back-compat: selectOption is called from 1-9 path. For
-				// multi_select, 1-9 should toggle, not submit.
+				// 1-9 on multi_select calls selectOption — same routing as
+				// toggleOption. Other is handled by the inline text input.
 				toggleOption(idx, q);
 				return;
 			}
@@ -464,12 +467,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				const opts = getRenderOptions(q);
 				const opt = opts[idx];
 				if (opt.isOther) {
-					inputMode = "other";
-					inputQuestionId = q.id;
-					// Pre-populate editor with previous "Other" text (Other revisit)
-					const prev = getOtherText(q, answers.get(q.id)?.value);
-					editor.setText(prev);
-					refresh();
+					if (optionIndex !== idx) {
+						optionIndex = idx;
+						refresh();
+					}
 					return;
 				}
 				const value: ConfirmAnswer = opt.label === "Affirm"
@@ -483,12 +484,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			const opts = getRenderOptions(q);
 			const opt = opts[idx];
 			if (opt.isOther) {
-				inputMode = "other";
-				inputQuestionId = q.id;
-				// Pre-populate editor with previous "Other" text (Other revisit)
-				const prev = getOtherText(q, answers.get(q.id)?.value);
-				editor.setText(prev);
-				refresh();
+				if (optionIndex !== idx) {
+					optionIndex = idx;
+					refresh();
+				}
 				return;
 			}
 			saveAnswer(q, { mode: "option", value: opt.label });
@@ -507,38 +506,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					return;
 				}
 				saveAnswer(q, n);
-			} else if (inputMode === "other") {
-				const trimmed = value.trim();
-				if (trimmed === "") {
-					inputMode = null;
-					inputQuestionId = null;
-					editor.setText("");
-					refresh();
-					return;
-				}
-				if (q.type === "select_many") {
-					// Merge with any existing checked options; drop any prior
-					// Other entry so re-committing doesn't accumulate
-					// duplicates.
-					const cur = answers.get(q.id)?.value;
-					const baseArr = Array.isArray(cur)
-						? (cur.filter(
-								(e) =>
-									typeof e === "object" && e !== null
-									&& (e as { mode?: string }).mode !== "other",
-							) as ChoiceAnswer[])
-						: [];
-					const arr: ChoiceAnswer[] = [
-						...baseArr,
-						{ mode: "other", text: trimmed },
-					];
-					saveAnswer(q, arr as AnswerValue);
-				} else {
-					const ans: AnswerValue = q.type === "confirm_enum"
-						? { mode: "other", text: trimmed }
-						: { mode: "other", text: trimmed };
-					saveAnswer(q, ans);
-				}
 			} else if (inputMode === "free_text") {
 				saveAnswer(q, value);
 			} else if (inputMode === "danger") {
@@ -679,7 +646,82 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// fall through to global keys (none match `[`) then tab nav
 			}
 
-			const q = currentQuestion()!;
+			// Multi-question tab nav runs before any other handlers so
+			// that `[`, `]`, `0`, Meta+1-4 work from any tab — including
+			// the Submit tab (where there's no active question).
+			if (isMulti) {
+				if (data === "[") {
+					currentTab = Math.max(0, currentTab - 1);
+					optionIndex = 0;
+					refresh();
+					reconcileMode(); // drive inputMode to match the new tab
+					return;
+				}
+				if (data === "]") {
+					currentTab = Math.min(questions.length, currentTab + 1);
+					optionIndex = 0;
+					refresh();
+					reconcileMode();
+					return;
+				}
+				if (data === "0") {
+					currentTab = questions.length;
+					refresh();
+					reconcileMode();
+					return;
+				}
+				// Meta+1..4: jump to question. ESC + digit arrives as "\x1b1" (2 chars).
+				if (data.startsWith("\x1b") && data.length >= 2 && data[1] >= "1" && data[1] <= "4") {
+					const n = Number(data[1]) - 1;
+					if (n < questions.length) {
+						currentTab = n;
+						optionIndex = 0;
+						refresh();
+						reconcileMode();
+						return;
+					}
+				}
+			}
+
+			const q = currentQuestion();
+
+			// On Submit tab (no active question) the only meaningful
+			// keys have already been handled above (the isOnSubmit branch
+			// for Enter/Esc, and the multi-question tab nav for [,],0).
+			if (!q) return;
+
+			// Inline "Other" text input. When the cursor lands on the
+			// Other option of a choice question, printable characters,
+			// Backspace, and Enter are routed into the inline text input
+			// (Other's text). Up/Down, Tab, Esc, ?, e, o, [, ], 0,
+			// Meta+1-4 all fall through to the normal keymap.
+			if (isOtherHighlighted(q)) {
+				if (data === "\r" || matchesKey(data, Key.enter)) {
+					commitOther(q);
+					return;
+				}
+				if (
+					matchesKey(data, Key.backspace)
+					|| matchesKey(data, "shift+backspace")
+					|| data === "\x7f"
+					|| data === "\b"
+				) {
+					ensureOtherText(q);
+					const cur = otherText[q.id] ?? "";
+					if (cur.length > 0) {
+						otherText[q.id] = cur.slice(0, -1);
+						refresh();
+					}
+					return;
+				}
+				if (data.length === 1 && data.charCodeAt(0) >= 32) {
+					ensureOtherText(q);
+					otherText[q.id] = (otherText[q.id] ?? "") + data;
+					refresh();
+					return;
+				}
+				// Anything else (arrows, Tab, Esc, etc.) falls through.
+			}
 
 			// Global keys
 			if (matchesKey(data, Key.escape)) {
@@ -718,39 +760,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				refresh();
 				return;
-			}
-			if (isMulti) {
-				if (data === "[") {
-					currentTab = Math.max(0, currentTab - 1);
-					optionIndex = 0;
-					refresh();
-					reconcileMode(); // drive inputMode to match the new tab
-					return;
-				}
-				if (data === "]") {
-					currentTab = Math.min(questions.length, currentTab + 1);
-					optionIndex = 0;
-					refresh();
-					reconcileMode();
-					return;
-				}
-				if (data === "0") {
-					currentTab = questions.length;
-					refresh();
-					reconcileMode();
-					return;
-				}
-				// Meta+1..4: jump to question. ESC + digit arrives as "\x1b1" (2 chars).
-				if (data.startsWith("\x1b") && data.length >= 2 && data[1] >= "1" && data[1] <= "4") {
-					const n = Number(data[1]) - 1;
-					if (n < questions.length) {
-						currentTab = n;
-						optionIndex = 0;
-						refresh();
-						reconcileMode();
-						return;
-					}
-				}
 			}
 
 			// Up/Down navigation on options
@@ -855,6 +864,87 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			return lastBrowserOpenAttempt;
 		}
 
+		// ---- Visual frame + inline Other text input -----------------------
+		// The questionnaire reads as one widget (frame) and the Other
+		// option is captured by a small inline text input directly below
+		// the option row — no modal editor, no Enter-to-open.
+
+		const FRAME_TITLE = "AskUserQuestion";
+
+		function wrapInFrame(inner: string[], width: number): string[] {
+			const minWidth = 12;
+			if (width < minWidth) return inner;
+			const innerWidth = width - 2;
+			const out: string[] = [];
+			const dim = (s: string) => theme.fg("muted", s);
+			const titleLabel = `─ ${FRAME_TITLE} `;
+			const titleRemaining = innerWidth - titleLabel.length - 1;
+			const topBorder =
+				"┌" +
+				titleLabel +
+				"─".repeat(Math.max(0, titleRemaining)) +
+				"┐";
+			out.push(dim(topBorder));
+			for (const line of inner) {
+				const vw = visibleWidth(line);
+				const pad = Math.max(0, innerWidth - vw);
+				out.push(dim("│") + line + " ".repeat(pad) + dim("│"));
+			}
+			out.push(dim("└" + "─".repeat(innerWidth - 1) + "┘"));
+			return out;
+		}
+
+		function otherIndexFor(q: CanonicalQuestion): number | null {
+			if (q.type !== "select_one" && q.type !== "select_many" && q.type !== "confirm_enum") {
+				return null;
+			}
+			const opts = getRenderOptions(q);
+			return opts.length - 1;
+		}
+
+		function isOtherHighlighted(q: CanonicalQuestion): boolean {
+			const idx = otherIndexFor(q);
+			return idx !== null && optionIndex === idx;
+		}
+
+		function ensureOtherText(q: CanonicalQuestion) {
+			if (otherText[q.id] !== undefined) return;
+			otherText[q.id] = getOtherText(q, answers.get(q.id)?.value);
+		}
+
+		function commitOther(q: CanonicalQuestion) {
+			const text = (otherText[q.id] ?? "").trim();
+			if (text === "") {
+				// Empty Other: behave like a no-op (don't commit a blank
+				// answer). The visual is unchanged.
+				refresh();
+				return;
+			}
+			if (q.type === "select_many") {
+				const cur = answers.get(q.id)?.value;
+				const baseArr: ChoiceAnswer[] = Array.isArray(cur)
+					? (cur.filter(
+							(e) =>
+								typeof e === "object" && e !== null
+								&& (e as { mode?: string }).mode !== "other",
+						) as ChoiceAnswer[])
+					: [];
+				const arr: ChoiceAnswer[] = [
+					...baseArr,
+					{ mode: "other", text },
+				];
+				saveAnswer(q, arr as AnswerValue);
+				// Advance like a normal select_many option pick — submit
+				// for single-question, next tab for multi-question. The
+				// user can still navigate back via `[` if they need to
+				// edit the Other text or add more options.
+				commitAndAdvance();
+				return;
+			}
+			saveAnswer(q, { mode: "other", text });
+			commitAndAdvance();
+		}
+
 		// Append the trailing status block (duration timer, browser URL,
 		// note indicator) to a render buffer. Shared between the normal
 		// question view and the is_dangerous confirmation view so both
@@ -889,7 +979,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			// Help overlay
 			if (viewMode === "help") {
-				return KEYMAP_HELP.map((l) => theme.fg("muted", l));
+				return wrapInFrame(
+					KEYMAP_HELP.map((l) => theme.fg("muted", l)),
+					width,
+				);
 			}
 
 			const lines: string[] = [];
@@ -940,7 +1033,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] submit  [Esc] cancel"));
-				return lines;
+				return wrapInFrame(lines, width);
 			}
 
 			const q = currentQuestion()!;
@@ -975,7 +1068,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] confirm  [Esc] cancel"));
 				appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);
-				return lines;
+				return wrapInFrame(lines, width);
 			}
 
 			lines.push(theme.fg("accent", theme.bold(q.header)));
@@ -996,14 +1089,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				lines.push(theme.fg("accent", "(typing in editor — Enter to save, Esc to discard)"));
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] save notes  [Esc] back to answer"));
-				return lines;
+				return wrapInFrame(lines, width);
 			}
 
 			if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 				const opts = getRenderOptions(q);
 				const currentValue = answers.get(q.id)?.value;
 				const isOtherChosen = isOtherSelectedFor(q, currentValue);
-				const otherText = getOtherText(q, currentValue);
+				const otherIdx = opts.length - 1;
 				for (let i = 0; i < opts.length; i++) {
 					const opt = opts[i];
 					const isOtherOpt = opt.isOther === true;
@@ -1016,9 +1109,24 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const active = isOtherOpt && isOtherChosen;
 					const previewExpanded = expandedPreview[q.id] === i;
 					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, width, theme, lines);
-					// If Other is chosen, show the text on the next line
-					if (isOtherOpt && isOtherChosen && otherText) {
-						addWrappedWithPrefix(lines, "     ", theme.fg("accent", `→ ${otherText}`), width);
+					if (isOtherOpt) {
+						// Inline text input under the Other option. Always
+						// prefill from the saved answer on first render of
+						// this question (idempotent).
+						ensureOtherText(q);
+						const draft = otherText[q.id] ?? "";
+						const inputActive = optionIndex === otherIdx;
+						if (inputActive) {
+							const arrow = theme.fg("accent", "▶ ");
+							const label = theme.fg("muted", "Other:");
+							const value = draft.length === 0
+								? theme.fg("dim", "(type a custom answer)")
+								: theme.fg("accent", draft);
+							const cursor = theme.fg("accent", "▏");
+							lines.push(`     ${arrow}${label} ${value}${cursor}`);
+						} else if (draft.length > 0) {
+							lines.push(`     ${theme.fg("muted", `Other: ${draft}`)}`);
+						}
 					}
 				}
 				// [Select] button for multi_select (commits the array)
@@ -1031,7 +1139,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				lines.push("");
 				if (q.type === "select_many") {
-					lines.push(theme.fg("muted", "↑/↓ navigate  Space/Enter toggle  Enter on [Select] to commit  Tab notes  e preview  ? help"));
+					lines.push(theme.fg("muted", "↑/↓ navigate  Space/Enter toggle  Tab notes  e preview  ? help"));
 				} else {
 					lines.push(theme.fg("muted", "↑/↓ navigate  Enter select  1-9 quick  Tab notes  e preview  o browser  ? help"));
 				}
@@ -1071,7 +1179,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// Suppress unused warning for the helper
 			void getOptionByIdx;
 
-			return lines;
+			return wrapInFrame(lines, width);
 		}
 
 		// Initial sync: if the first question is in danger mode, open the
