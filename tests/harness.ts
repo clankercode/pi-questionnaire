@@ -19,6 +19,11 @@ import {
 } from "../src/side-effects.ts";
 import type { AskUserQuestionInput } from "../src/schema.ts";
 import type { AskUserQuestionSettings } from "../src/settings.ts";
+import {
+	DEFAULT_SETTINGS,
+	getSettings,
+	saveSettings,
+} from "../src/settings.ts";
 
 interface HarnessCommand {
 	cmd: string;
@@ -97,6 +102,53 @@ async function main() {
 			case "renderOptions": {
 				const q = normalizeQuestions([(cmd.question as never) || {}])[0];
 				result = getRenderOptions(q);
+				break;
+			}
+			case "applySettingsChange": {
+				// Exercises the persistence path the settings menu drives:
+				// read the merged view (from <cwd>/.pi/ + global disk),
+				// apply a patch, write the full merged view back to the
+				// project file, then read it back. Returns everything a
+				// test needs to assert on: the resolved projectPath,
+				// whether the file exists, the raw file content, the
+				// before-view and after-view (post-sanitize), and the
+				// success flag from saveSettings.
+				//
+				// `globalDir` redirects PI_AGENT_DIR so getSettings() reads
+				// from an empty temp dir instead of the user's real
+				// ~/.pi/agent/. This keeps the test hermetic.
+				const cwd = (cmd.cwd as string | undefined) ?? process.cwd();
+				const globalDir = cmd.globalDir as string | undefined;
+				const patch = (cmd.patch ?? {}) as Partial<AskUserQuestionSettings>;
+				if (globalDir !== undefined) {
+					process.env.PI_AGENT_DIR = globalDir;
+				}
+				const projectPath = `${cwd}/.pi/ask-user-question.json`;
+				const { existsSync, readFileSync } = await import("node:fs");
+
+				const before = getSettings(cwd);
+				const updated = { ...before, ...patch };
+				const ok = saveSettings(updated, cwd);
+				const after = getSettings(cwd);
+
+				let fileContent: Record<string, unknown> | null = null;
+				if (existsSync(projectPath)) {
+					try {
+						fileContent = JSON.parse(readFileSync(projectPath, "utf-8"));
+					} catch {
+						fileContent = null;
+					}
+				}
+
+				result = {
+					ok,
+					projectPath,
+					fileExists: existsSync(projectPath),
+					fileContent,
+					before,
+					after,
+					defaults: DEFAULT_SETTINGS,
+				};
 				break;
 			}
 			case "renderTui": {

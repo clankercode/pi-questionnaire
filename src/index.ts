@@ -9,7 +9,12 @@ import { AskUserQuestionParams, validateSemantics } from "./schema.ts";
 import { normalizeQuestions } from "./normalize.ts";
 import { buildQuestionnaireComponent, type TuiResult } from "./tui.ts";
 import { fireOnQuestionSideEffects } from "./side-effects.ts";
-import { getSettings } from "./settings.ts";
+import { getSettings, saveSettings } from "./settings.ts";
+import {
+	buildSettingsMenuComponent,
+	DEFAULT_SECTIONS,
+	type SettingsMenuValue,
+} from "./settings-menu.ts";
 import type { AnswerMap, CanonicalQuestion, ToolResultDetails } from "./types.ts";
 
 function formatAnswers(
@@ -101,6 +106,7 @@ function renderResultText(details: ToolResultDetails, theme: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	registerSettingsCommand(pi);
 	pi.registerTool({
 		name: "AskUserQuestion",
 		label: "AskUserQuestion",
@@ -227,6 +233,45 @@ export default function (pi: ExtensionAPI) {
 				return new Text(text?.type === "text" ? text.text : "", 0, 0);
 			}
 			return new Text(renderResultText(details, theme), 0, 0);
+		},
+	});
+}
+
+/**
+ * Register `/settings-ask-user-question` — a two-level TUI menu (section
+ * picker → setting list) that lets the user tweak the 13 fields in
+ * src/settings.ts. Each change is persisted to <cwd>/.pi/ask-user-question.json
+ * via the existing saveSettings() path.
+ *
+ * Requires TUI mode (the same constraint as the AskUserQuestion tool
+ * itself). In headless / print mode the command emits a notification.
+ */
+function registerSettingsCommand(pi: ExtensionAPI): void {
+	pi.registerCommand("settings-ask-user-question", {
+		description:
+			"Configure the AskUserQuestion extension (browser, notifications, TTS, heartbeat, debounce, danger check).",
+		handler: async (_args, ctx) => {
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify(
+					"AskUserQuestion settings menu requires interactive (tui) mode.",
+					"warning",
+				);
+				return;
+			}
+			await ctx.ui.custom<{ lifecycle: "exited" }>((tui, theme, kb, done) =>
+				buildSettingsMenuComponent({
+					sections: DEFAULT_SECTIONS,
+					getCurrent: () => getSettings(),
+					onChange: (id, value: SettingsMenuValue) => {
+						// Read the current merged view, apply the patch, and
+						// write the FULL merged view back. The next
+						// getSettings() call picks up the change immediately
+						// because saveSettings writes synchronously.
+						const updated = { ...getSettings(), [id]: value };
+						saveSettings(updated);
+					},
+				})(tui, theme, kb, done),
+			);
 		},
 	});
 }
