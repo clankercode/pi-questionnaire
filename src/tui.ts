@@ -169,6 +169,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		}
 
 		function advanceAfterAnswer() {
+			if (!isMulti) {
+				// Single-question flow: commit immediately.
+				done({ answers: Array.from(answers.values()), cancelled: false });
+				return;
+			}
 			if (currentTab < questions.length - 1) {
 				currentTab += 1;
 			} else {
@@ -178,17 +183,33 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			refresh();
 		}
 
-		function selectOption(opt: RenderOption, q: CanonicalQuestion) {
+		function selectOption(idx: number, q: CanonicalQuestion) {
 			if (q.type === "multi_select") {
 				const set = checked[q.id] ?? new Set<number>();
-				const idx = q.options!.indexOf(opt);
 				if (set.has(idx)) set.delete(idx);
 				else set.add(idx);
 				checked[q.id] = set;
+				const labels = Array.from(set).map((i) => getRenderOptions(q)[i].label);
+				saveAnswer(q, labels, false);
+				// For single-question, commit immediately. For multi, stay on
+				// the question so the user can tab to the next one.
+				if (!isMulti) {
+					done({ answers: Array.from(answers.values()), cancelled: false });
+					return;
+				}
 				refresh();
 				return;
 			}
-			// single_select / confirm
+			if (q.type === "confirm") {
+				// Confirm always returns a boolean (true for Yes, false for No).
+				const isYes = idx === 0;
+				saveAnswer(q, isYes, false, idx + 1);
+				advanceAfterAnswer();
+				return;
+			}
+			// single_select
+			const opts = getRenderOptions(q);
+			const opt = opts[idx];
 			if (opt.isOther) {
 				inputMode = "other";
 				inputQuestionId = q.id;
@@ -196,7 +217,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				refresh();
 				return;
 			}
-			const idx = q.options!.indexOf(opt);
 			saveAnswer(q, opt.label, false, idx + 1);
 			advanceAfterAnswer();
 		}
@@ -295,20 +315,22 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			// text input
 			if (q.type === "text") {
-				if (matchesKey(data, Key.enter) && q.multiline) {
-					// newline within multiline
+				// Lazy-init input mode on first relevant keystroke.
+				if (!inputMode) {
+					inputMode = "text";
+					inputQuestionId = q.id;
+					if (editor.getText() === "" && typeof q.default === "string") {
+						editor.setText(q.default);
+					}
 				}
-				if (matchesKey(data, Key.enter) && !q.multiline) {
+				if (matchesKey(data, Key.enter) && q.multiline) {
+					// newline within multiline — let editor handle it
+				} else if (matchesKey(data, Key.enter) && !q.multiline) {
 					const v = editor.getText().trim();
 					saveAnswer(q, v, false);
 					editor.setText("");
 					advanceAfterAnswer();
 					return;
-				}
-				inputMode = "text";
-				inputQuestionId = q.id;
-				if (editor.getText() === "" && typeof q.default === "string") {
-					editor.setText(q.default);
 				}
 				editor.handleInput(data);
 				refresh();
@@ -317,19 +339,20 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			// number input
 			if (q.type === "number") {
+				// Lazy-init input mode on first relevant keystroke.
+				if (!inputMode) {
+					inputMode = "number";
+					inputQuestionId = q.id;
+				}
 				if (matchesKey(data, Key.up)) {
 					const cur = Number(editor.getText() || "0");
 					editor.setText(String(Number.isFinite(cur) ? cur + 1 : 1));
-					inputMode = "number";
-					inputQuestionId = q.id;
 					refresh();
 					return;
 				}
 				if (matchesKey(data, Key.down)) {
 					const cur = Number(editor.getText() || "0");
 					editor.setText(String(Number.isFinite(cur) ? cur - 1 : 0));
-					inputMode = "number";
-					inputQuestionId = q.id;
 					refresh();
 					return;
 				}
@@ -341,9 +364,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					advanceAfterAnswer();
 					return;
 				}
-				// start editing
-				inputMode = "number";
-				inputQuestionId = q.id;
 				editor.handleInput(data);
 				refresh();
 				return;
@@ -366,13 +386,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				return;
 			}
 			if (matchesKey(data, Key.space) && q.type === "multi_select") {
-				const opt = opts[optionIndex];
-				selectOption(opt, q);
+				selectOption(optionIndex, q);
 				return;
 			}
 			if (matchesKey(data, Key.enter)) {
-				const opt = opts[optionIndex];
-				selectOption(opt, q);
+				selectOption(optionIndex, q);
 				return;
 			}
 			if (matchesKey(data, Key.escape)) {
@@ -464,6 +482,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						const range = [q.min, q.max].filter((n) => n !== undefined).join("…");
 						addWrappedWithPrefix(lines, " ", theme.fg("dim", `  range: ${range}`), W);
 					}
+					addWrappedWithPrefix(lines, " ", theme.fg("muted", "Your answer:"), W);
 					const rendered = editor.render(Math.max(1, W - 2));
 					for (const l of rendered) lines.push(` ${l}`);
 					lines.push("");
@@ -475,12 +494,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						addWrappedWithPrefix(lines, " ", theme.fg("dim", "Enter confirm • Tab/←→ next • Esc cancel"), W);
 					}
 				} else if (q.type === "text" || q.type === "number") {
-					// Not yet editing — show editor empty with prompt
+					// Not yet editing — show editor empty with prompt and
+					// wait for the first keystroke to enter input mode.
 					const placeholder = q.placeholder ?? (q.type === "number" ? "0" : "type your answer…");
 					addWrappedWithPrefix(lines, " ", theme.fg("muted", `> ${placeholder}`), W);
-					editor.setText("");
-					inputMode = q.type;
-					inputQuestionId = q.id;
 				} else {
 					// select-type
 					const opts =
@@ -497,6 +514,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					}
 					if (inputMode === "other" && inputQuestionId === q.id) {
 						lines.push("");
+						addWrappedWithPrefix(lines, " ", theme.fg("muted", "Your answer:"), W);
 						const rendered = editor.render(Math.max(1, W - 2));
 						for (const l of rendered) lines.push(` ${l}`);
 						lines.push("");

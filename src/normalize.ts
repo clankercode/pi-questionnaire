@@ -51,6 +51,15 @@ function appendOther(options: SelectOption[]): SelectOption[] {
 	return [...options, { label: "Other", description: "Provide a custom answer" }];
 }
 
+/** Cap a raw options list at MAX_OPTIONS_PER_SELECT minus 1, leaving room for
+ * the auto-appended "Other" option. */
+export function capOptionsForOther(raw: unknown): unknown {
+	if (!Array.isArray(raw)) return raw;
+	const cap = 7; // +1 for the auto-appended "Other" = 8
+	if (raw.length <= cap) return raw;
+	return raw.slice(0, cap);
+}
+
 export function normalizeQuestion(raw: RawQuestion, index: number): CanonicalQuestion {
 	const type: QuestionType | "invalid" = resolveType(
 		raw.type,
@@ -76,7 +85,9 @@ export function normalizeQuestion(raw: RawQuestion, index: number): CanonicalQue
 		required: raw.required !== false,
 	};
 	if (needsOptions(type)) {
-		const opts = (raw.options ?? []).map(normalizeOption);
+		// Cap at 7 so the auto-appended "Other" brings us to 8 max.
+		const rawOpts = (raw.options ?? []).slice(0, 7);
+		const opts = rawOpts.map(normalizeOption);
 		q.options = appendOther(opts);
 	}
 	if (raw.default !== undefined) q.default = raw.default as CanonicalQuestion["default"];

@@ -9,7 +9,12 @@ import assert from "node:assert/strict";
 import { buildQuestionnaireComponent } from "../src/tui.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
 
-const fakeTui = { requestRender: () => {} };
+// We import runHarness for the "normalize caps at 7" test which needs the
+// normalize() command in tests/harness.ts.
+import { runHarness as _runHarness } from "./harness-runner.mjs";
+function runHarness(cmd) { return _runHarness(cmd); }
+
+const fakeTui = makeFakeTui();
 const fakeTheme = makeFakeTheme();
 
 function makeFakeTheme() {
@@ -26,12 +31,12 @@ function makeFakeTheme() {
 function render(questions, width = 80) {
 	const canonical = normalizeQuestions(questions);
 	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const tui = makeFakeTui();
 	let captured = null;
-	factory(fakeTui, fakeTheme, {}, (v) => {
+	factory(tui, fakeTheme, {}, (v) => {
 		captured = v;
 	});
-	// The factory returns a fresh component each call; capture the second call's return.
-	const component = factory(fakeTui, fakeTheme, {}, () => {});
+	const component = factory(tui, fakeTheme, {}, () => {});
 	const lines = component.render(width);
 	return { lines, captured, component };
 }
@@ -151,4 +156,158 @@ test("header field caps at 20 chars in tab bar", () => {
 	const joined = lines.join("\n");
 	// header truncated to 20 chars
 	assert.match(joined, /ThisIsAVeryLongHead/);
+});
+
+// ---- Interaction tests (drive the component via handleInput) --------------
+
+function makeFakeTui() {
+	return {
+		requestRender: () => {},
+		terminal: { rows: 24, cols: 80 },
+	};
+}
+
+function drive(questions) {
+	const canonical = normalizeQuestions(questions);
+	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const tui = makeFakeTui();
+	let doneValue = null;
+	const component = factory(tui, fakeTheme, {}, (v) => {
+		doneValue = v;
+	});
+	return { component, getDone: () => doneValue };
+}
+
+test("multi_select: Space toggles, then Enter commits array of labels", () => {
+	const { component, getDone } = drive([{
+		id: "ms",
+		question: "Pick toppings?",
+		type: "multi_select",
+		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+	}]);
+	// Highlight first option, toggle it
+	component.handleInput(" ");
+	// Move to second
+	component.handleInput("\u001b[B"); // Key.down
+	// Toggle second
+	component.handleInput(" ");
+	// Move to third
+	component.handleInput("\u001b[B"); // Key.down
+	// Toggle third
+	component.handleInput(" ");
+	// Multi-select commits the answer on each toggle (it saves a snapshot),
+	// so we expect the snapshot to contain all three labels.
+	// Now hit Enter to commit and advance to the submit tab.
+	component.handleInput("\r");
+	const done = getDone();
+	// In multi-question, Enter saves and advances. With 1 question, we go
+	// to the submit tab. Press Enter again on submit tab to commit.
+	if (done === null) {
+		component.handleInput("\r"); // submit
+	}
+	const finalDone = getDone();
+	if (finalDone === null) {
+		// The flow may have advanced to the submit tab; look at the answers
+		// map by inspecting the component's internal state via re-render.
+		// Easiest: just assert that the saved answer was an array of 3 items.
+	}
+	// The cleaner test: drive the multi-select with a single question, then
+	// call Space three times and assert the saved answer is correct.
+	// Re-do the test from scratch with explicit assertions.
+	const { component: c2, getDone: d2 } = drive([{
+		id: "ms2",
+		question: "Pick?",
+		type: "multi_select",
+		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+	}]);
+	c2.handleInput(" "); // toggle A
+	c2.handleInput("\u001b[B"); // move to B
+	c2.handleInput(" "); // toggle B
+	// Now drive to done. After Space, the answer is saved. After another
+	// action that triggers done, we get the result.
+	c2.handleInput("\r"); // enter (advances to submit tab for single-question)
+	c2.handleInput("\r"); // submit
+	const v = d2();
+	assert.ok(v !== null, "expected done() to be called");
+	if (v) {
+		assert.equal(v.cancelled, false);
+		// The answers array will contain one entry for "ms2" with the array
+		// of toggled labels. Order may differ; check as set.
+		assert.equal(v.answers.length, 1);
+		const a = v.answers[0];
+		assert.equal(a.id, "ms2");
+		assert.deepEqual([...a.value].sort(), ["A", "B"]);
+	}
+});
+
+test("confirm: Enter on Yes returns boolean true", () => {
+	const { component, getDone } = drive([{
+		id: "c",
+		question: "Proceed?",
+		type: "confirm",
+	}]);
+	component.handleInput("\r"); // enter on first option (Yes)
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		assert.equal(v.cancelled, false);
+		const a = v.answers[0];
+		assert.equal(a.id, "c");
+		assert.equal(a.value, true);
+	}
+});
+
+test("confirm: arrow-down + Enter on No returns boolean false", () => {
+	const { component, getDone } = drive([{
+		id: "c",
+		question: "Proceed?",
+		type: "confirm",
+	}]);
+	component.handleInput("\u001b[B"); // Key.down
+	component.handleInput("\r"); // enter on No
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		assert.equal(v.answers[0].value, false);
+	}
+});
+
+test("single_select Other: Enter on Other opens text editor", () => {
+	const { component } = drive([{
+		id: "x",
+		question: "Pick?",
+		type: "single_select",
+		options: [{ label: "A" }, { label: "B" }, { label: "Other" }],
+	}]);
+	component.handleInput("\u001b[B"); // down to B
+	component.handleInput("\u001b[B"); // down to Other
+	component.handleInput("\r"); // enter on Other → opens editor
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	// After entering Other, the editor should be visible
+	assert.match(joined, /Your answer:/);
+});
+
+test("Esc cancels the whole questionnaire", () => {
+	const { component, getDone } = drive([{
+		id: "x",
+		question: "Pick?",
+		type: "single_select",
+		options: [{ label: "A" }, { label: "B" }],
+	}]);
+	component.handleInput("\u001b"); // Key.escape
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		assert.equal(v.cancelled, true);
+		assert.equal(v.answers.length, 0);
+	}
+});
+
+test("normalize caps at 7 options so post-Other is 8", () => {
+	const r = runHarness({ cmd: "normalize", input: [{
+		id: "x", "question": "q?", "type": "single_select",
+		options: Array.from({ length: 9 }, (_, i) => ({ label: `opt${i}` })),
+	}] });
+	assert.equal(r.value[0].options.length, 8, "capped at 8 (7 + Other)");
 });

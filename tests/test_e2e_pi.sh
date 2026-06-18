@@ -217,6 +217,89 @@ if [[ ${RC4} -ne 0 ]]; then
 fi
 echo "OK  test 4 (smoke): extension loaded successfully"
 
+# --- Test 5: multi_select (was BLOCKER in PIRFL review) ---------------------
+TMPDIR_TEST5="$(mktemp -d)"
+trap 'rm -rf "${TMPDIR_TEST1}" "${TMPDIR_TEST2}" "${TMPDIR_TEST3}" "${TMPDIR_TEST5}"' EXIT
+
+ANSWERS_FILE5="${TMPDIR_TEST5}/answers.json"
+cat >"${ANSWERS_FILE5}" <<'EOF'
+{"0": ["mushrooms", "pepperoni"]}
+EOF
+
+PROMPT5="You MUST call the ask_user tool with exactly one question: type=multi_select, id=\"toppings\", header=\"Toppings\", question=\"Pick your toppings\", with options=[{label:\"mushrooms\"}, {label:\"pepperoni\"}, {label:\"olives\"}]. After the tool returns, list the user's selections in EXACT format: 'PICKS:<comma-separated labels>'."
+
+OUT5="$(mktemp)"
+ERR5="$(mktemp)"
+set +e
+PI_QUESTIONNAIRE_ANSWERS_FILE="${ANSWERS_FILE5}" \
+  timeout 120 "${PI_BIN}" --print \
+    --provider "${PROVIDER}" \
+    --model "${MODEL}" \
+    --no-session \
+    --extension "${EXT_PATH}" \
+    -p "${PROMPT5}" \
+    >"${OUT5}" 2>"${ERR5}"
+RC5=$?
+set -e
+
+cp "${OUT5}" "${TRANSCRIPT_DIR}/e2e_05_multi_select.out"
+cp "${ERR5}" "${TRANSCRIPT_DIR}/e2e_05_multi_select.err"
+
+if [[ ${RC5} -ne 0 ]]; then
+  echo "FAIL: test 5 (multi_select) exited with rc=${RC5}" >&2
+  tail -20 "${OUT5}" >&2
+  tail -20 "${ERR5}" >&2
+  exit 1
+fi
+
+# Expect at least one of the two chosen labels to be reported
+if ! grep -qE "PICKS:.*mushrooms" "${OUT5}" || ! grep -qE "PICKS:.*pepperoni" "${OUT5}"; then
+  echo "FAIL: test 5 expected PICKS line with both 'mushrooms' and 'pepperoni'" >&2
+  tail -20 "${OUT5}" >&2
+  exit 1
+fi
+echo "OK  test 5 (multi_select): model reported user's multi-pick via the tool"
+
+# --- Test 6: confirm returns boolean (was BLOCKER in PIRFL review) ----------
+TMPDIR_TEST6="$(mktemp -d)"
+trap 'rm -rf "${TMPDIR_TEST1}" "${TMPDIR_TEST2}" "${TMPDIR_TEST3}" "${TMPDIR_TEST5}" "${TMPDIR_TEST6}"' EXIT
+
+ANSWERS_FILE6="${TMPDIR_TEST6}/answers.json"
+cat >"${ANSWERS_FILE6}" <<'EOF'
+{"0": true}
+EOF
+
+PROMPT6="You MUST call the ask_user tool with exactly one question: type=confirm, id=\"proceed\", header=\"Proceed\", question=\"Delete the production database?\". After the tool returns, reply in EXACT format: 'CONFIRMED:<yes or no>' based on what the user chose."
+
+OUT6="$(mktemp)"
+ERR6="$(mktemp)"
+set +e
+PI_QUESTIONNAIRE_ANSWERS_FILE="${ANSWERS_FILE6}" \
+  timeout 120 "${PI_BIN}" --print \
+    --provider "${PROVIDER}" \
+    --model "${MODEL}" \
+    --no-session \
+    --extension "${EXT_PATH}" \
+    -p "${PROMPT6}" \
+    >"${OUT6}" 2>"${ERR6}"
+RC6=$?
+set -e
+
+cp "${OUT6}" "${TRANSCRIPT_DIR}/e2e_06_confirm.out"
+
+if [[ ${RC6} -ne 0 ]]; then
+  echo "FAIL: test 6 (confirm) exited with rc=${RC6}" >&2
+  tail -20 "${OUT6}" >&2
+  exit 1
+fi
+
+if ! grep -qE "CONFIRMED:yes" "${OUT6}"; then
+  echo "FAIL: test 6 expected 'CONFIRMED:yes' in output (answers file had true)" >&2
+  tail -20 "${OUT6}" >&2
+  exit 1
+fi
+echo "OK  test 6 (confirm): tool returned boolean true, model reported 'yes'"
+
 echo ""
 echo "ALL E2E TESTS PASSED"
 echo "Transcripts: ${TRANSCRIPT_DIR}/e2e_*.{out,err}"
