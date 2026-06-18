@@ -543,18 +543,20 @@ let expanded = new Set();
 let sendTimer;
 let reconnectTimer;
 let reconnectDelay = 500;
+let terminalLifecycle = false;
 function connect(){
+  if(terminalLifecycle) return;
   clearTimeout(reconnectTimer);
   socket = new WebSocket(BOOT.wsUrl);
   socket.onopen = () => { reconnectDelay = 500; document.getElementById('status').textContent = 'Connected'; };
-  socket.onclose = () => { document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
+  socket.onclose = () => { if(terminalLifecycle) return; document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if(message.type === 'state') state = {...state, ...message};
     if(message.type === 'tab') state.currentTab = message.currentTab;
     if(message.type === 'answers') state.answers = message.answers || {};
     if(message.type === 'options') state.options = message.options || {notes:{}};
-    if(message.type === 'lifecycle' && message.lifecycle !== 'open') document.getElementById('overlay').classList.add('visible');
+    if(message.type === 'lifecycle' && message.lifecycle !== 'open') { terminalLifecycle = true; clearTimeout(reconnectTimer); document.getElementById('status').textContent = message.lifecycle; document.getElementById('overlay').classList.add('visible'); }
     render();
   };
 }
