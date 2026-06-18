@@ -22,6 +22,7 @@ import type {
 	RenderOption,
 } from "./types.ts";
 import { coerceNumber, getRenderOptions } from "./answers.ts";
+import { getSettings } from "./settings.ts";
 
 // ---- Public types ---------------------------------------------------------
 
@@ -40,6 +41,11 @@ export interface TuiResult {
 
 export interface TuiOptions {
 	questions: CanonicalQuestion[];
+	/**
+	 * Writer used for terminal control sequences (OSC 0 title, BEL).
+	 * Defaults to `process.stdout.write`. Override in tests to capture.
+	 */
+	terminalWriter?: (s: string) => void;
 }
 
 // ---- Tabs -----------------------------------------------------------------
@@ -176,6 +182,27 @@ export function clearTerminalTitle(
 	setTerminalTitle("", write);
 }
 
+// ---- Terminal bell (BEL) -------------------------------------------------
+
+const BEL = "\x07";
+
+/**
+ * Play an audible terminal bell (BEL, \x07). Gated by the
+ * `bellOnQuestion` setting so users running in shared/quiet environments
+ * can disable it without losing the title hint.
+ *
+ * Returns `true` if a BEL was written, `false` if the setting disabled it
+ * (or if no writer is available). The bell fires once per questionnaire
+ * mount — submit/cancel/dispose do not re-trigger it.
+ */
+export function playBell(
+	write: (s: string) => void = (s) => process.stdout.write(s),
+): boolean {
+	if (getSettings().bellOnQuestion !== true) return false;
+	write(BEL);
+	return true;
+}
+
 // ---- Component factory ----------------------------------------------------
 
 /** Format a duration in ms as a human-readable string (e.g. "1m 23s"). */
@@ -199,10 +226,18 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 	const totalTabs = questions.length + 1; // + Submit tab
 
 	return (tui: any, theme: any, _kb: any, done: (v: TuiResult) => void) => {
+		// Writer for terminal control sequences (title, BEL). Defaults to
+		// process.stdout.write; tests inject a capturing writer via
+		// TuiOptions.terminalWriter.
+		const terminalWriter: (s: string) => void = opts.terminalWriter ?? ((s) => process.stdout.write(s));
+
 		// Prefix the terminal title with a bell so the user notices the
 		// questionnaire is waiting. Restored (cleared) on done.
 		const firstHeader = questions[0]?.header ?? "Question";
-		setTerminalTitle(`🔔 AskUserQuestion — ${firstHeader}`);
+		setTerminalTitle(`🔔 AskUserQuestion — ${firstHeader}`, terminalWriter);
+		// Audible terminal bell (gated by bellOnQuestion setting, default on).
+		// Independent of the title signal — title is visual, BEL is audio.
+		playBell(terminalWriter);
 		let currentTab = 0;
 		let optionIndex = 0;
 		const checked: Record<string, Set<number>> = {};
@@ -270,7 +305,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function commitAndAdvance() {
 			viewMode = "answer";
 			if (!isMulti) {
-				done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
+				// Single-question flow shares the cleanup path with submit()
+				// (clear title, stop timer). Otherwise the terminal title and
+				// 1Hz render interval would outlive the questionnaire.
+				submit();
 				return;
 			}
 			if (currentTab < questions.length - 1) {
@@ -284,13 +322,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function submit() {
 			if (durationTimer !== null) clearInterval(durationTimer);
-			clearTerminalTitle();
+			clearTerminalTitle(terminalWriter);
 			done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
 		}
 
 		function cancel() {
 			if (durationTimer !== null) clearInterval(durationTimer);
-			clearTerminalTitle();
+			clearTerminalTitle(terminalWriter);
 			done({ answers: [], notes, lifecycle: "cancelled" });
 		}
 
@@ -301,7 +339,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				clearInterval(durationTimer);
 				durationTimer = null;
 			}
-			clearTerminalTitle();
+			clearTerminalTitle(terminalWriter);
 		}
 
 		// --- option selection ----------------------------------------------

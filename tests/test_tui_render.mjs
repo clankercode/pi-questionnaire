@@ -9,9 +9,18 @@ import assert from "node:assert/strict";
 import {
 	buildQuestionnaireComponent,
 	clearTerminalTitle,
+	playBell,
 	setTerminalTitle,
 } from "../src/tui.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
+import {
+	clearInMemorySettings,
+	DEFAULT_SETTINGS,
+	getSettings,
+	loadSettings,
+	saveSettings,
+	setInMemorySettings,
+} from "../src/settings.ts";
 
 import { runHarness as _runHarness } from "./harness-runner.mjs";
 function runHarness(cmd) { return _runHarness(cmd); }
@@ -37,9 +46,18 @@ function makeFakeTui() {
 	};
 }
 
+// Default writer used by the shared helpers — a no-op so the test suite
+// doesn't leak OSC title writes and BELs onto the real process.stdout.
+// Individual tests that need to assert on writes use terminalWriter
+// explicitly with a capturing writer.
+const silentWriter = () => {};
+
 function render(questions, width = 80) {
 	const canonical = normalizeQuestions(questions);
-	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const factory = buildQuestionnaireComponent({
+		questions: canonical,
+		terminalWriter: silentWriter,
+	});
 	const tui = makeFakeTui();
 	const component = factory(tui, fakeTheme, {}, () => {});
 	const lines = component.render(width);
@@ -48,7 +66,10 @@ function render(questions, width = 80) {
 
 function drive(questions) {
 	const canonical = normalizeQuestions(questions);
-	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const factory = buildQuestionnaireComponent({
+		questions: canonical,
+		terminalWriter: silentWriter,
+	});
 	const tui = makeFakeTui();
 	let doneValue = null;
 	const component = factory(tui, fakeTheme, {}, (v) => {
@@ -340,7 +361,10 @@ test("duration timer appears in status line; updates on re-render", async () => 
 	const canonical = normalizeQuestions([{
 		header: "h", question: "q?", type: "free_text",
 	}]);
-	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const factory = buildQuestionnaireComponent({
+		questions: canonical,
+		terminalWriter: silentWriter,
+	});
 	const tui = makeFakeTui();
 	const c = factory(tui, fakeTheme, {}, () => {});
 	const t0 = Date.now();
@@ -359,7 +383,10 @@ test("dispose() prevents further timer callbacks; safe to call multiple times", 
 	const canonical = normalizeQuestions([{
 		header: "h", question: "q?", type: "free_text",
 	}]);
-	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const factory = buildQuestionnaireComponent({
+		questions: canonical,
+		terminalWriter: silentWriter,
+	});
 	const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
 	c.dispose();
 	c.dispose(); // no throw
@@ -603,4 +630,346 @@ test("tab bar shows ■ for answered, ▣ for answered+note, □ for unanswered"
 	// the test harness has a fake tui that may not handle text.
 	// For this test, just check the structure renders the bar.
 	assert.match(joined, /Submit/);
+});
+
+// ============================================================================
+// Settings module (src/settings.ts)
+// ============================================================================
+//
+// We exercise the merge/sanitize logic by pointing loadSettings at arbitrary
+// paths via its { globalPath, projectPath } options. No real user config is
+// touched. The `node:fs` mkdtempSync helper gives us a clean tmpdir per test.
+
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync as fsWriteFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+function makeTmpDir() {
+	return mkdtempSync(join(tmpdir(), "pi-questionnaire-settings-"));
+}
+
+test("settings: load returns DEFAULTS when no files exist", () => {
+	const dir = makeTmpDir();
+	try {
+		const s = loadSettings(dir, {
+			globalPath: join(dir, "absent.global.json"),
+			projectPath: join(dir, "absent.project.json"),
+		});
+		assert.deepEqual(s, {});
+		// But getSettings() always returns the full resolved view.
+		const resolved = getSettings(dir);
+		assert.equal(resolved.bellOnQuestion, DEFAULT_SETTINGS.bellOnQuestion);
+		assert.equal(resolved.browserMinQuestions, DEFAULT_SETTINGS.browserMinQuestions);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: project file overrides global file (project wins)", () => {
+	const dir = makeTmpDir();
+	try {
+		// Use distinct filenames so both layers can co-exist.
+		const g = join(dir, "global.json");
+		const p = join(dir, "project.json");
+		fsWriteFileSync(g, JSON.stringify({
+			browserEnabled: true,
+			browserMinQuestions: 1,
+			bellOnQuestion: true,
+		}));
+		fsWriteFileSync(p, JSON.stringify({
+			browserMinQuestions: 4,  // overrides global
+			bellOnQuestion: false,    // overrides global
+		}));
+		const s = loadSettings(dir, { globalPath: g, projectPath: p });
+		// browserEnabled: only in global, preserved
+		assert.equal(s.browserEnabled, true);
+		// browserMinQuestions: project wins
+		assert.equal(s.browserMinQuestions, 4);
+		// bellOnQuestion: project wins (false)
+		assert.equal(s.bellOnQuestion, false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: drop unknown keys + coerce/reject fields with wrong types", () => {
+	const dir = makeTmpDir();
+	try {
+		const p = join(dir, "project.json");
+		fsWriteFileSync(p, JSON.stringify({
+			browserEnabled: "true",      // string, not boolean → dropped
+			browserMinQuestions: 2.5,     // not integer → dropped
+			browserMinQuestions_min: -1,  // out of range → dropped
+			browserMinQuestions_max: 99,  // out of range → dropped
+			bellOnQuestion: true,         // valid
+			notificationDelaySeconds: -10, // below min → dropped
+			heartbeatIntervalMinutes: 999, // above max → dropped
+			onQuestionCommand: "say 'question'", // valid string
+			bogusKey: { deep: [1, 2] },   // unknown → dropped
+			__proto__: { polluted: true }, // attempt at prototype pollution → dropped
+		}));
+		const s = loadSettings(dir, { projectPath: p });
+		assert.equal(s.browserEnabled, undefined, "string 'true' dropped");
+		assert.equal(s.browserMinQuestions, undefined, "non-integer dropped");
+		assert.equal(s.bellOnQuestion, true);
+		assert.equal(s.notificationDelaySeconds, undefined);
+		assert.equal(s.heartbeatIntervalMinutes, undefined);
+		assert.equal(s.onQuestionCommand, "say 'question'");
+		assert.equal(s.bogusKey, undefined);
+		// Sanity: no pollution slipped through.
+		assert.equal(({}).polluted, undefined);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: save + reload round-trip preserves every valid field", () => {
+	const dir = makeTmpDir();
+	try {
+		const snapshot = {
+			browserEnabled: false,
+			browserAutoOpen: true,
+			browserMinQuestions: 3,
+			copyUrlToClipboard: false,
+			bellOnQuestion: false,
+			notificationOnQuestion: true,
+			notificationDelaySeconds: 90,
+			ttsOnQuestion: true,
+			onQuestionCommand: "echo asked",
+			heartbeatWhileActive: true,
+			heartbeatIntervalMinutes: 7.5,
+			debounceMs: 750,
+			dangerCheckEnabled: false,
+		};
+		const ok = saveSettings(snapshot, dir);
+		assert.equal(ok, true);
+		const reloaded = loadSettings(dir);
+		assert.deepEqual(reloaded, snapshot);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: getSettings returns full resolved view (no missing fields)", () => {
+	const dir = makeTmpDir();
+	try {
+		// Force-set cwd via cwd param — getSettings reads project from <cwd>/.pi/.
+		const resolved = getSettings(dir, {
+			// getSettings() doesn't take path overrides directly, but
+			// loadSettings does — verify the public surface resolves every
+			// default for a fresh dir.
+			__unused: undefined,
+		});
+		void resolved;
+		const r = getSettings(dir);
+		// Every DEFAULT_SETTINGS key must be present and of the right type.
+		for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+			assert.ok(k in r, `missing resolved key: ${k}`);
+			assert.equal(typeof r[k], typeof v, `type mismatch for ${k}`);
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: setInMemorySettings overrides disk for the duration of the test", () => {
+	const dir = makeTmpDir();
+	try {
+		// Disk says bellOnQuestion: false. getSettings reads project from
+		// <cwd>/.pi/ask-user-question.json, so write there.
+		const projectPath = join(dir, ".pi", "ask-user-question.json");
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		fsWriteFileSync(projectPath, JSON.stringify({ bellOnQuestion: false }));
+		// Baseline: bellOnQuestion should be false from disk.
+		const before = getSettings(dir);
+		assert.equal(before.bellOnQuestion, false);
+		// Now override.
+		setInMemorySettings({ bellOnQuestion: true });
+		try {
+			const overridden = getSettings(dir);
+			assert.equal(overridden.bellOnQuestion, true);
+		} finally {
+			clearInMemorySettings();
+		}
+		// After clear: back to disk value.
+		const after = getSettings(dir);
+		assert.equal(after.bellOnQuestion, false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("settings: malformed project file is ignored (warning logged, defaults returned)", () => {
+	const dir = makeTmpDir();
+	try {
+		const p = join(dir, "project.json");
+		fsWriteFileSync(p, "{ this is not valid JSON");
+		const origWarn = console.warn;
+		const warnings = [];
+		console.warn = (...args) => warnings.push(args.join(" "));
+		try {
+			const s = loadSettings(dir, { projectPath: p });
+			assert.deepEqual(s, {});
+		} finally {
+			console.warn = origWarn;
+		}
+		assert.ok(
+			warnings.some((w) => w.includes("Ignoring malformed settings")),
+			"expected a warning about the malformed settings file",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ============================================================================
+// BEL emission (gated by bellOnQuestion)
+// ============================================================================
+
+test("playBell writes BEL when bellOnQuestion is true (default)", () => {
+	clearInMemorySettings();
+	const writes = [];
+	const writer = (s) => writes.push(s);
+	const ok = playBell(writer);
+	assert.equal(ok, true);
+	assert.deepEqual(writes, ["\x07"]);
+});
+
+test("playBell writes nothing when bellOnQuestion is false", () => {
+	setInMemorySettings({ bellOnQuestion: false });
+	try {
+		const writes = [];
+		const writer = (s) => writes.push(s);
+		const ok = playBell(writer);
+		assert.equal(ok, false);
+		assert.deepEqual(writes, []);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("TUI mount writes a BEL when bellOnQuestion is true (default)", () => {
+	clearInMemorySettings();
+	const writes = [];
+	const writer = (s) => writes.push(s);
+	const canonical = normalizeQuestions([{
+		header: "Pick",
+		question: "Pick one?",
+		type: "select_one",
+		options: [{ label: "A" }, { label: "B" }],
+	}]);
+	const factory = buildQuestionnaireComponent({
+		questions: canonical,
+		terminalWriter: writer,
+	});
+	const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+	// Exactly one standalone BEL (no title prefix, just \x07 by itself).
+	const bareBel = writes.filter((w) => w === "\x07");
+	assert.equal(bareBel.length, 1, `expected exactly 1 BEL, got ${bareBel.length}; writes=${JSON.stringify(writes)}`);
+	c.dispose();
+});
+
+test("TUI mount writes NO BEL when bellOnQuestion is false (in-memory override)", () => {
+	setInMemorySettings({ bellOnQuestion: false });
+	try {
+		const writes = [];
+		const writer = (s) => writes.push(s);
+		const canonical = normalizeQuestions([{
+			header: "Pick",
+			question: "Pick one?",
+			type: "select_one",
+			options: [{ label: "A" }, { label: "B" }],
+		}]);
+		const factory = buildQuestionnaireComponent({
+			questions: canonical,
+			terminalWriter: writer,
+		});
+		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		const bareBel = writes.filter((w) => w === "\x07");
+		assert.equal(bareBel.length, 0, `expected no BEL; writes=${JSON.stringify(writes)}`);
+		// Title prefix still fires (independent signal).
+		const titleCalls = writes.filter((w) => w.startsWith("\x1b]0;"));
+		assert.ok(titleCalls.length >= 1, "title prefix should still be set even when BEL is off");
+		c.dispose();
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
+	clearInMemorySettings();
+
+	// --- submit path (single-question select_one) ---
+	{
+		const writes = [];
+		const writer = (s) => writes.push(s);
+		const canonical = normalizeQuestions([{
+			header: "Pick",
+			question: "Pick one?",
+			type: "select_one",
+			options: [{ label: "A" }, { label: "B" }],
+		}]);
+		const factory = buildQuestionnaireComponent({
+			questions: canonical,
+			terminalWriter: writer,
+		});
+		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		c.handleInput("\r"); // single-question: Enter triggers commitAndAdvance → submit()
+		const bareBel = writes.filter((w) => w === "\x07");
+		assert.equal(
+			bareBel.length,
+			1,
+			`submit path: expected exactly 1 BEL, got ${bareBel.length}; writes=${JSON.stringify(writes)}`,
+		);
+		// And the title was cleared on submit.
+		const titleClears = writes.filter((w) => w === "\x1b]0;\x07");
+		assert.ok(titleClears.length >= 1, "submit must clear the terminal title");
+	}
+
+	// --- cancel path ---
+	{
+		const writes = [];
+		const writer = (s) => writes.push(s);
+		const canonical = normalizeQuestions([{
+			header: "Pick",
+			question: "Pick one?",
+			type: "select_one",
+			options: [{ label: "A" }, { label: "B" }],
+		}]);
+		const factory = buildQuestionnaireComponent({
+			questions: canonical,
+			terminalWriter: writer,
+		});
+		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		c.handleInput("\x1b"); // Escape triggers cancel()
+		const bareBel = writes.filter((w) => w === "\x07");
+		assert.equal(
+			bareBel.length,
+			1,
+			`cancel path: expected exactly 1 BEL, got ${bareBel.length}; writes=${JSON.stringify(writes)}`,
+		);
+		const titleClears = writes.filter((w) => w === "\x1b]0;\x07");
+		assert.ok(titleClears.length >= 1, "cancel must clear the terminal title");
+	}
+
+	// --- dispose path (safe to call twice) ---
+	{
+		const writes = [];
+		const writer = (s) => writes.push(s);
+		const canonical = normalizeQuestions([{
+			header: "Pick",
+			question: "Pick one?",
+			type: "select_one",
+			options: [{ label: "A" }, { label: "B" }],
+		}]);
+		const factory = buildQuestionnaireComponent({
+			questions: canonical,
+			terminalWriter: writer,
+		});
+		const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+		c.dispose();
+		c.dispose(); // safe to call twice
+		const bareBel = writes.filter((w) => w === "\x07");
+		assert.equal(bareBel.length, 1, "dispose path: bell fires exactly once on mount");
+	}
 });
