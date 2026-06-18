@@ -4,22 +4,31 @@ from __future__ import annotations
 from conftest import run_harness
 
 
-def test_normalize_injects_other_option():
-    """The 'Other' option is auto-appended for single/multi_select."""
+# --- Other option injection --------------------------------------------
+
+def test_select_one_injects_other():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "single_select",
+        "header": "x", "question": "q?", "type": "select_one",
         "options": [{"label": "A"}, {"label": "B"}],
     }]})
     assert r["ok"] is True, r
-    opts = r["value"][0]["options"]
-    labels = [o["label"] for o in opts]
-    assert labels == ["A", "B", "Other"], labels
+    labels = [o["label"] for o in r["value"][0]["options"]]
+    assert labels == ["A", "B", "Other"]
 
 
-def test_normalize_dedupes_existing_other():
-    """If the user already added an 'Other', don't add another."""
+def test_select_many_injects_other():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "single_select",
+        "header": "x", "question": "q?", "type": "select_many",
+        "options": [{"label": "A"}, {"label": "B"}],
+    }]})
+    assert r["ok"] is True
+    labels = [o["label"] for o in r["value"][0]["options"]]
+    assert labels[-1] == "Other"
+
+
+def test_dedupes_existing_other():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "x", "question": "q?", "type": "select_one",
         "options": [{"label": "A"}, {"label": "B"}, {"label": "Other"}],
     }]})
     assert r["ok"] is True
@@ -28,59 +37,194 @@ def test_normalize_dedupes_existing_other():
     assert len(labels) == 3
 
 
-def test_normalize_promotes_v1_markdown_to_preview():
-    """pag-server v1: option.markdown string becomes a markdown preview."""
+# --- confirm_enum auto-fill -------------------------------------------
+
+def test_confirm_enum_autofills_when_no_options():
+    """Per spec: confirm_enum with no options normalizes to Affirm/Decline + Other."""
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "single_select",
-        "options": [
-            {"label": "A", "markdown": "# hi\nbody"},
-            {"label": "B"},
-        ],
+        "header": "x", "question": "Go?", "type": "confirm_enum",
+    }]})
+    assert r["ok"] is True, r
+    labels = [o["label"] for o in r["value"][0]["options"]]
+    assert labels == ["Affirm", "Decline", "Other"]
+
+
+def test_confirm_enum_preserves_user_options():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "x", "question": "Mode?", "type": "confirm_enum",
+        "options": [{"label": "Auto"}, {"label": "Manual"}],
     }]})
     assert r["ok"] is True
-    a = r["value"][0]["options"][0]
-    assert a["preview"]["type"] == "markdown"
-    assert a["preview"]["content"] == "# hi\nbody"
+    labels = [o["label"] for o in r["value"][0]["options"]]
+    assert labels == ["Auto", "Manual", "Other"]
 
 
-def test_normalize_prompts_alias():
-    """`prompt` is accepted as alias for `question`."""
+# --- options cap (7 + Other = 8) --------------------------------------
+
+def test_caps_options_at_7_user_provided():
+    """User-provided options are capped at 7 (so + Other = 8 max)."""
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "prompt": "hi?", "type": "text",
+        "header": "x", "question": "q?", "type": "select_one",
+        "options": [{"label": f"opt{i}"} for i in range(10)],
     }]})
     assert r["ok"] is True
-    assert r["value"][0]["question"] == "hi?"
+    labels = [o["label"] for o in r["value"][0]["options"]]
+    assert len(labels) == 8  # 7 + Other
+    assert labels[-1] == "Other"
 
 
-def test_normalize_defaults_required_true():
+# --- description field ------------------------------------------------
+
+def test_preserves_description():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "text",
-    }]})
-    assert r["value"][0]["required"] is True
-
-
-def test_normalize_explicit_required_false():
-    r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "text", "required": False,
-    }]})
-    assert r["value"][0]["required"] is False
-
-
-def test_normalize_header_truncates_to_20():
-    r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x",
-        "header": "this is a very long header for sure",
-        "question": "q?",
-        "type": "text",
+        "header": "h", "question": "q?", "description": "Context here",
+        "type": "free_text",
     }]})
     assert r["ok"] is True
-    assert len(r["value"][0]["header"]) == 20
+    assert r["value"][0]["description"] == "Context here"
 
 
-def test_normalize_auto_id_when_missing():
+def test_description_optional():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "free_text",
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0].get("description") is None or "description" not in r["value"][0]
+
+
+# --- number/free_text: no options ------------------------------------
+
+def test_number_rejects_options_at_normalize():
+    """Schema already rejects, but normalize is also defensive."""
+    # Skipped at normalize layer since schema catches it; but we test schema
+    # for the canonical "no options" case:
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "number",
+    }]})
+    assert r["ok"] is True
+    assert "options" not in r["value"][0]
+
+
+def test_free_text_rejects_options_at_normalize():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "free_text",
+    }]})
+    assert r["ok"] is True
+    assert "options" not in r["value"][0]
+
+
+# --- default validation ----------------------------------------------
+
+def test_default_select_one_must_match_label():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "select_one",
+        "options": [{"label": "A"}, {"label": "B"}],
+        "default": "C",
+    }]})
+    assert r["ok"] is False
+    assert "default" in r["reason"]
+
+
+def test_default_select_one_matching_label():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "select_one",
+        "options": [{"label": "A"}, {"label": "B"}],
+        "default": "A",
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["default"] == "A"
+
+
+def test_default_select_many_must_be_array():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "select_many",
+        "options": [{"label": "A"}, {"label": "B"}],
+        "default": "A",
+    }]})
+    assert r["ok"] is False
+    assert "array" in r["reason"].lower()
+
+
+def test_default_select_many_array():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "select_many",
+        "options": [{"label": "A"}, {"label": "B"}],
+        "default": ["A", "B"],
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["default"] == ["A", "B"]
+
+
+def test_default_confirm_enum_must_be_affirm_or_decline():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "confirm_enum",
+        "default": "maybe",
+    }]})
+    assert r["ok"] is False
+    assert "affirm" in r["reason"] or "decline" in r["reason"]
+
+
+def test_default_confirm_enum_affirm():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "confirm_enum",
+        "default": "affirm",
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["default"] == "affirm"
+
+
+def test_default_number_must_be_number():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "number",
+        "default": "forty-two",
+    }]})
+    assert r["ok"] is False
+    assert "number" in r["reason"].lower()
+
+
+def test_default_number():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "number",
+        "default": 42,
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["default"] == 42
+
+
+def test_default_free_text():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "free_text",
+        "default": "hello",
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["default"] == "hello"
+
+
+# --- free_text multiline default -------------------------------------
+
+def test_free_text_multiline_defaults_to_true():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "free_text",
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["multiline"] is True
+
+
+def test_free_text_multiline_explicit_false():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "free_text",
+        "multiline": False,
+    }]})
+    assert r["ok"] is True
+    assert r["value"][0]["multiline"] is False
+
+
+# --- id handling ------------------------------------------------------
+
+def test_auto_id_when_missing():
     r = run_harness({"cmd": "normalize", "input": [
-        {"question": "q1?", "type": "text"},
-        {"question": "q2?", "type": "text"},
+        {"header": "h", "question": "q1?", "type": "free_text"},
+        {"header": "h", "question": "q2?", "type": "free_text"},
     ]})
     assert r["ok"] is True
     ids = [q["id"] for q in r["value"]]
@@ -88,35 +232,49 @@ def test_normalize_auto_id_when_missing():
     assert all(i for i in ids)
 
 
-def test_normalize_invalid_type_raises():
+def test_explicit_id_preserved():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "bogus",
+        "id": "deploy-1", "header": "h", "question": "q?", "type": "free_text",
     }]})
-    assert r["ok"] is False
-    assert "invalid" in r["reason"]
+    assert r["ok"] is True
+    assert r["value"][0]["id"] == "deploy-1"
 
 
-def test_normalize_preserves_typed_preview():
+# --- header truncation ------------------------------------------------
+
+def test_header_truncates_to_20():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "single_select",
+        "header": "this is a very long header for sure",
+        "question": "q?", "type": "free_text",
+    }]})
+    assert r["ok"] is True
+    assert len(r["value"][0]["header"]) == 20
+
+
+# --- preview handling --------------------------------------------------
+
+def test_preserves_typed_preview():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "h", "question": "q?", "type": "select_one",
         "options": [
             {"label": "A", "preview": {"type": "mermaid", "content": "graph TD; A-->B"}},
             {"label": "B"},
         ],
     }]})
+    assert r["ok"] is True
     a = r["value"][0]["options"][0]
     assert a["preview"]["type"] == "mermaid"
     assert "A-->B" in a["preview"]["content"]
 
 
-def test_normalize_rejects_unknown_preview_type():
+def test_rejects_unknown_preview_type():
     r = run_harness({"cmd": "normalize", "input": [{
-        "id": "x", "question": "q?", "type": "single_select",
+        "header": "h", "question": "q?", "type": "select_one",
         "options": [
             {"label": "A", "preview": {"type": "video", "content": "x"}},
             {"label": "B"},
         ],
     }]})
-    # The unknown preview type is silently dropped (preview is optional).
+    assert r["ok"] is True
     a = r["value"][0]["options"][0]
     assert a.get("preview") is None

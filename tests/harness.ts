@@ -3,9 +3,14 @@
 // schema/normalize/answers modules, emits JSON results on stdout.
 // Used by the Python pytest suite to test against the real TypeScript code.
 
-import { AskUserParams, validateSemantics, resolveType } from "../src/schema.ts";
+import { AskUserQuestionParams, validateSemantics } from "../src/schema.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
-import { parseAnswerPayload, validateAgainstQuestions, coerceNumber, getRenderOptions } from "../src/answers.ts";
+import {
+	coerceNumber,
+	getRenderOptions,
+	parseAnswerPayload,
+	validateAgainstQuestions,
+} from "../src/answers.ts";
 import { buildQuestionnaireComponent } from "../src/tui.ts";
 
 interface HarnessCommand {
@@ -22,76 +27,6 @@ async function readAllStdin(): Promise<string> {
 	return Buffer.concat(chunks).toString("utf8");
 }
 
-async function main() {
-	const raw = await readAllStdin();
-	const cmd = JSON.parse(raw) as HarnessCommand;
-	let result: unknown;
-	switch (cmd.cmd) {
-		case "validate": {
-			const v = validateSemantics(cmd.input as never);
-			result = v;
-			break;
-		}
-		case "resolveType": {
-			result = resolveType(
-				cmd.explicit as string | undefined,
-				cmd.inputMode as string | undefined,
-				cmd.legacyMulti as boolean,
-				cmd.options,
-			);
-			break;
-		}
-		case "normalize": {
-			try {
-				const normalized = normalizeQuestions(cmd.input as never);
-				result = { ok: true, value: normalized };
-			} catch (err) {
-				result = { ok: false, reason: (err as Error).message };
-			}
-			break;
-		}
-		case "parseAnswers": {
-			result = parseAnswerPayload(cmd.input);
-			break;
-		}
-		case "validateAnswers": {
-			const questions = cmd.questions as never[];
-			const answers = cmd.answers as never;
-			result = validateAgainstQuestions(
-				normalizeQuestions(questions),
-				answers as never,
-			);
-			break;
-		}
-		case "coerceNumber": {
-			const q = normalizeQuestions([(cmd.question as never) || {}])[0];
-			result = coerceNumber(cmd.input as string, q);
-			break;
-		}
-		case "renderOptions": {
-			const q = normalizeQuestions([(cmd.question as never) || {}])[0];
-			result = getRenderOptions(q);
-			break;
-		}
-		case "renderTui": {
-			const questions = normalizeQuestions(cmd.questions as never);
-			const factory = buildQuestionnaireComponent({ questions });
-			const fakeTui = { requestRender: () => {} };
-			const fakeTheme = makeFakeTheme();
-			let captured: { render: (w: number) => string[]; handleInput: (d: string) => void; invalidate: () => void } | null = null;
-			factory(fakeTui as never, fakeTheme as never, {} as never, () => {});
-			captured = factory(fakeTui as never, fakeTheme as never, {} as never, () => {}) as never;
-			const width = (cmd.width as number) || 80;
-			const lines = (captured as { render: (w: number) => string[] }).render(width);
-			result = { lines };
-			break;
-		}
-		default:
-			result = { ok: false, reason: `unknown cmd: ${cmd.cmd}` };
-	}
-	process.stdout.write(JSON.stringify(result ?? null));
-}
-
 function makeFakeTheme() {
 	const F = (color: string, text: string) => `[${color}]${text}[/${color}]`;
 	return {
@@ -103,7 +38,84 @@ function makeFakeTheme() {
 	};
 }
 
+async function main() {
+	const raw = await readAllStdin();
+	const cmd = JSON.parse(raw) as HarnessCommand;
+	let result: unknown;
+	try {
+		switch (cmd.cmd) {
+			case "validate": {
+				const v = validateSemantics(cmd.input as never);
+				result = v;
+				break;
+			}
+			case "detectLegacyFields": {
+				const { detectLegacyFields } = await import("../src/schema.ts");
+				result = detectLegacyFields(cmd.input);
+				break;
+			}
+			case "normalize": {
+				try {
+					const normalized = normalizeQuestions(cmd.input as never);
+					result = { ok: true, value: normalized };
+				} catch (err) {
+					result = { ok: false, reason: (err as Error).message };
+				}
+				break;
+			}
+			case "parseAnswers": {
+				const questions = cmd.questions
+					? normalizeQuestions(cmd.questions as never)
+					: [];
+				result = parseAnswerPayload(cmd.input, questions);
+				break;
+			}
+			case "validateAnswers": {
+				const questions = cmd.questions
+					? normalizeQuestions(cmd.questions as never)
+					: [];
+				const answers = cmd.answers as never;
+				result = validateAgainstQuestions(questions, answers);
+				break;
+			}
+			case "coerceNumber": {
+				const q = normalizeQuestions([(cmd.question as never) || {}])[0];
+				result = coerceNumber(cmd.input as string, q);
+				break;
+			}
+			case "renderOptions": {
+				const q = normalizeQuestions([(cmd.question as never) || {}])[0];
+				result = getRenderOptions(q);
+				break;
+			}
+			case "renderTui": {
+				const questions = normalizeQuestions(cmd.questions as never);
+				const factory = buildQuestionnaireComponent({ questions });
+				const fakeTui = { requestRender: () => {} };
+				const fakeTheme = makeFakeTheme();
+				const width = (cmd.width as number) || 80;
+				const component = factory(
+					fakeTui as never,
+					fakeTheme as never,
+					{} as never,
+					() => {},
+				);
+				const lines = (component as { render: (w: number) => string[] }).render(width);
+				result = { lines };
+				break;
+			}
+			default:
+				result = { ok: false, reason: `unknown cmd: ${cmd.cmd}` };
+		}
+	} catch (err) {
+		result = { ok: false, reason: (err as Error).message, stack: (err as Error).stack };
+	}
+	process.stdout.write(JSON.stringify(result ?? null));
+}
+
 main().catch((err) => {
-	process.stdout.write(JSON.stringify({ ok: false, reason: (err as Error).message, stack: (err as Error).stack }));
+	process.stdout.write(
+		JSON.stringify({ ok: false, reason: (err as Error).message, stack: (err as Error).stack }),
+	);
 	process.exit(1);
 });

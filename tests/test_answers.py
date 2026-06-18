@@ -1,112 +1,194 @@
-"""Answer parsing & validation tests — exercises src/answers.ts."""
+"""Answer parsing & validation tests — exercises src/answers.ts (v2)."""
 from __future__ import annotations
 
 from conftest import run_harness
 
 
-# --- parseAnswerPayload ---------------------------------------------------
+# --- v2 parseAnswerPayload: index-keyed object --------------------------
 
-def test_parse_flat_canonical():
+def test_parse_select_one_option_mode():
     r = run_harness({
         "cmd": "parseAnswers",
-        "input": {"0": "Staging", "1": ["A", "B"], "2": "free text"},
+        "questions": [
+            {"header": "h", "question": "q?", "type": "select_one",
+             "options": [{"label": "A"}, {"label": "B"}]},
+        ],
+        "input": {"0": {"mode": "option", "value": "A"}},
     })
-    assert r["answers"] == {"0": "Staging", "1": ["A", "B"], "2": "free text"}
+    assert r["answers"]["0"] == {"mode": "option", "value": "A"}
 
 
-def test_parse_pag_server_nested_shape():
-    """pag-server: { selected, other } per question."""
+def test_parse_select_one_other_mode():
     r = run_harness({
         "cmd": "parseAnswers",
-        "input": {
-            "0": {"selected": "Staging", "other": ""},
-            "1": {"selected": ["A", "B"]},
-        },
+        "questions": [
+            {"header": "h", "question": "q?", "type": "select_one",
+             "options": [{"label": "A"}, {"label": "B"}]},
+        ],
+        "input": {"0": {"mode": "other", "text": "Custom"}},
     })
-    assert r["answers"]["0"] == "Staging"
-    assert r["answers"]["1"] == ["A", "B"]
+    assert r["answers"]["0"] == {"mode": "other", "text": "Custom"}
 
 
-def test_parse_pag_server_answers_envelope():
-    """pag-server: { answers: { ... } } outer envelope."""
+def test_parse_select_many_array():
     r = run_harness({
         "cmd": "parseAnswers",
+        "questions": [
+            {"header": "h", "question": "q?", "type": "select_many",
+             "options": [{"label": "A"}, {"label": "B"}]},
+        ],
+        "input": {"0": [{"mode": "option", "value": "A"}, {"mode": "other", "text": "X"}]},
+    })
+    assert r["answers"]["0"] == [
+        {"mode": "option", "value": "A"},
+        {"mode": "other", "text": "X"},
+    ]
+
+
+def test_parse_confirm_enum_affirm():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "confirm_enum"}],
+        "input": {"0": {"mode": "option", "value": "affirm"}},
+    })
+    assert r["answers"]["0"] == {"mode": "option", "value": "affirm"}
+
+
+def test_parse_confirm_enum_decline():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "confirm_enum"}],
+        "input": {"0": {"mode": "option", "value": "decline"}},
+    })
+    assert r["answers"]["0"] == {"mode": "option", "value": "decline"}
+
+
+def test_parse_confirm_enum_other():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "confirm_enum"}],
+        "input": {"0": {"mode": "other", "text": "Maybe"}},
+    })
+    assert r["answers"]["0"] == {"mode": "other", "text": "Maybe"}
+
+
+def test_parse_number():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "number"}],
+        "input": {"0": 42},
+    })
+    assert r["answers"]["0"] == 42
+
+
+def test_parse_free_text():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "free_text"}],
+        "input": {"0": "free-form text"},
+    })
+    assert r["answers"]["0"] == "free-form text"
+
+
+# --- envelopes: pag-server compat is dropped in v2 -----------------------
+
+def test_parse_envelope_unwraps_answers():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "free_text"}],
         "input": {"answers": {"0": "X"}},
     })
     assert r["answers"] == {"0": "X"}
 
 
-def test_parse_pag_server_question_response_envelope():
-    """pag-server: { question_response: { answers: { ... } } }."""
+def test_parse_envelope_unwraps_question_response():
     r = run_harness({
         "cmd": "parseAnswers",
-        "input": {"question_response": {"answers": {"0": "X"}}},
+        "questions": [{"header": "h", "question": "q?", "type": "free_text"}],
+        "input": {"question_response": {"answers": {"0": "Y"}}},
     })
-    assert r["answers"] == {"0": "X"}
-
-
-def test_parse_other_label_with_free_text():
-    """When 'Other' is selected, the 'other' string refines the value."""
-    r = run_harness({
-        "cmd": "parseAnswers",
-        "input": {
-            "0": {"selected": "Other", "other": "Custom region"},
-        },
-    })
-    assert r["answers"]["0"] == "Custom region"
+    assert r["answers"] == {"0": "Y"}
 
 
 def test_parse_notes():
     r = run_harness({
         "cmd": "parseAnswers",
-        "input": {
-            "0": "X",
-            "notes": {"0": "context for X", "1": "n2"},
-        },
+        "questions": [
+            {"header": "h", "question": "q1?", "type": "free_text"},
+            {"header": "h2", "question": "q2?", "type": "free_text"},
+        ],
+        "input": {"0": "X", "notes": {"0": "context for X", "1": "n2"}},
     })
     assert r["answers"]["0"] == "X"
     assert r["notes"]["0"] == "context for X"
     assert r["notes"]["1"] == "n2"
 
 
-def test_parse_drops_empty_strings():
-    r = run_harness({
-        "cmd": "parseAnswers",
-        "input": {"0": "", "1": "  ", "2": "ok"},
-    })
-    assert "0" not in r["answers"]
-    assert "1" not in r["answers"]
-    assert r["answers"]["2"] == "ok"
-
-
 def test_parse_stringifies_int_keys():
     r = run_harness({
         "cmd": "parseAnswers",
-        "input": {0: "X", 1: "Y"},
+        "questions": [{"header": "h", "question": "q?", "type": "free_text"}],
+        "input": {"0": "X"},
     })
-    # JS object keys are always strings; ints get stringified.
-    assert r["answers"] == {"0": "X", "1": "Y"}
+    assert r["answers"] == {"0": "X"}
 
 
-# --- validateAgainstQuestions --------------------------------------------
+# --- validateAgainstQuestions (v2 types) --------------------------------
 
-def test_validate_required_missing():
+def test_validate_select_one_ok():
     r = run_harness({
         "cmd": "validateAnswers",
-        "questions": [
-            {"id": "a", "question": "q?", "type": "text"},
-            {"id": "b", "question": "q?", "type": "text"},
-        ],
-        "answers": {"0": "x"},
+        "questions": [{
+            "header": "h", "question": "q?", "type": "select_one",
+            "options": [{"label": "A"}, {"label": "B"}],
+        }],
+        "answers": {"0": {"mode": "option", "value": "A"}},
+    })
+    assert r["ok"] is True, r
+
+
+def test_validate_select_one_unknown_label():
+    r = run_harness({
+        "cmd": "validateAnswers",
+        "questions": [{
+            "header": "h", "question": "q?", "type": "select_one",
+            "options": [{"label": "A"}, {"label": "B"}],
+        }],
+        "answers": {"0": {"mode": "option", "value": "Z"}},
     })
     assert r["ok"] is False
-    assert any("required" in e for e in r["errors"])
+    assert any("Z" in e for e in r["errors"])
+
+
+def test_validate_select_many_must_be_array():
+    r = run_harness({
+        "cmd": "validateAnswers",
+        "questions": [{
+            "header": "h", "question": "q?", "type": "select_many",
+            "options": [{"label": "A"}, {"label": "B"}],
+        }],
+        "answers": {"0": {"mode": "option", "value": "A"}},
+    })
+    assert r["ok"] is False
+    assert any("array" in e.lower() for e in r["errors"])
+
+
+def test_validate_confirm_wrong_internal_value():
+    r = run_harness({
+        "cmd": "validateAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "confirm_enum"}],
+        "answers": {"0": {"mode": "option", "value": "maybe"}},
+    })
+    assert r["ok"] is False
+    assert any("affirm" in e or "decline" in e for e in r["errors"])
 
 
 def test_validate_number_out_of_range():
     r = run_harness({
         "cmd": "validateAnswers",
-        "questions": [{"id": "n", "question": "n?", "type": "number", "min": 1, "max": 10}],
+        "questions": [{
+            "header": "h", "question": "q?", "type": "number", "min": 1, "max": 10,
+        }],
         "answers": {"0": 42},
     })
     assert r["ok"] is False
@@ -116,42 +198,48 @@ def test_validate_number_out_of_range():
 def test_validate_number_in_range():
     r = run_harness({
         "cmd": "validateAnswers",
-        "questions": [{"id": "n", "question": "n?", "type": "number", "min": 1, "max": 10}],
+        "questions": [{
+            "header": "h", "question": "q?", "type": "number", "min": 1, "max": 10,
+        }],
         "answers": {"0": 5},
     })
     assert r["ok"] is True, r
 
 
-def test_validate_confirm_wrong_type():
+def test_validate_missing_answer():
     r = run_harness({
         "cmd": "validateAnswers",
-        "questions": [{"id": "c", "question": "c?", "type": "confirm"}],
-        "answers": {"0": "yes"},
+        "questions": [
+            {"header": "h", "question": "q1?", "type": "free_text"},
+            {"header": "h2", "question": "q2?", "type": "free_text"},
+        ],
+        "answers": {"0": "x"},
     })
     assert r["ok"] is False
-    assert any("boolean" in e for e in r["errors"])
+    assert any("1 " in e or "not answered" in e for e in r["errors"])
 
 
-def test_validate_multi_select_must_be_array():
+def test_validate_free_text_wrong_type():
+    r = run_harness({
+        "cmd": "validateAnswers",
+        "questions": [{"header": "h", "question": "q?", "type": "free_text"}],
+        "answers": {"0": 42},
+    })
+    assert r["ok"] is False
+    assert any("string" in e.lower() for e in r["errors"])
+
+
+def test_validate_select_one_other_with_empty_text():
     r = run_harness({
         "cmd": "validateAnswers",
         "questions": [{
-            "id": "ms", "question": "ms?", "type": "multi_select",
+            "header": "h", "question": "q?", "type": "select_one",
             "options": [{"label": "A"}, {"label": "B"}],
         }],
-        "answers": {"0": "A"},
+        "answers": {"0": {"mode": "other", "text": "  "}},
     })
     assert r["ok"] is False
-    assert any("array" in e for e in r["errors"])
-
-
-def test_validate_optional_can_be_empty():
-    r = run_harness({
-        "cmd": "validateAnswers",
-        "questions": [{"id": "a", "question": "q?", "type": "text", "required": False}],
-        "answers": {},
-    })
-    assert r["ok"] is True, r
+    assert any("non-empty" in e for e in r["errors"])
 
 
 # --- coerceNumber --------------------------------------------------------
@@ -159,7 +247,7 @@ def test_validate_optional_can_be_empty():
 def test_coerce_number_basic():
     r = run_harness({
         "cmd": "coerceNumber",
-        "question": {"id": "n", "question": "n?", "type": "number"},
+        "question": {"header": "h", "question": "q?", "type": "number"},
         "input": "42",
     })
     assert r == 42
@@ -168,7 +256,7 @@ def test_coerce_number_basic():
 def test_coerce_number_respects_min_max():
     r = run_harness({
         "cmd": "coerceNumber",
-        "question": {"id": "n", "question": "n?", "type": "number", "min": 1, "max": 10},
+        "question": {"header": "h", "question": "q?", "type": "number", "min": 1, "max": 10},
         "input": "100",
     })
     assert r is None
@@ -177,7 +265,7 @@ def test_coerce_number_respects_min_max():
 def test_coerce_number_rejects_nan():
     r = run_harness({
         "cmd": "coerceNumber",
-        "question": {"id": "n", "question": "n?", "type": "number"},
+        "question": {"header": "h", "question": "q?", "type": "number"},
         "input": "not a number",
     })
     assert r is None
@@ -186,7 +274,7 @@ def test_coerce_number_rejects_nan():
 def test_coerce_number_handles_decimals():
     r = run_harness({
         "cmd": "coerceNumber",
-        "question": {"id": "n", "question": "n?", "type": "number"},
+        "question": {"header": "h", "question": "q?", "type": "number"},
         "input": "3.14",
     })
     assert r == 3.14

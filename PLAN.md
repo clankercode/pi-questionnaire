@@ -1,146 +1,264 @@
-# PLAN.md — pi-questionnaire
+# AskUserQuestion v2 — Implementation Plan
 
-## High-level
+**Date:** 2026-06-18
+**Spec:** `docs/superpowers/specs/2026-06-18-askuserquestion-v2-design.md`
+**Worktree:** `../pi-questionnarie-v2` on branch `v2/ask-user-question`
 
-Build a pi-coding-agent extension that exposes a single rich, flexible
-questionnaire tool — `ask_user` — supporting the full set of question styles
-inspired by pag-server's questionnaire v2 contract (single_select, multi_select,
-text, plus extras: confirm, number). All styles share a unified UI with
-tabbed navigation, descriptions, and rich previews (markdown / mermaid / svg /
-code). The tool is fully usable from the LLM and from scripts/agents, with a
-headless mode for deterministic e2e tests.
+## Philosophy
 
-## Deliverables
+TDD discipline: each slice ships a failing test first, then minimal code to pass it, then refactor. Commit after each green test. The plan below lists the slice order; within each slice the TDD steps are explicit.
 
-1. `src/` — TypeScript source:
-   - `index.ts` — extension entry; registers the `ask_user` tool
-   - `schema.ts` — typebox schemas + per-question validation
-   - `normalize.ts` — canonical v2 question shape (input_mode, typed preview)
-   - `answers.ts` — answer parsing → canonical `{"0": ..., "1": [...]}` map
-   - `tui.ts` — the rich TUI component (all question types, tabbed nav)
-   - `headless.ts` — env-var-driven answer loading for e2e tests
-   - `types.ts` — shared TS types
-2. `tests/` — Python + bash:
-   - `test_schema.py` — schema validation, including pag-server compat shapes
-   - `test_normalize.py` — payload normalization
-   - `test_answers.py` — answer parsing & canonical map
-   - `test_headless.py` — env-var headless path
-   - `test_tui_render.ts` — snapshot the rendered lines for each question type
-   - `test_e2e_pi.sh` — tmux + `pi --print` integration test
-   - `MODEL_NOTES.md` — record which model patterns work for `--print`
-   - `transcripts/` — saved e2e transcripts for replay/debug
-3. `docs/` — ARCHITECTURE.md, USAGE.md
-4. `package.json` — declares `pi.extensions` entry; `dependencies` for
-   `@earendil-works/pi-coding-agent`, `pi-tui`, `pi-ai`, `typebox`.
-5. `README.md` — install, usage, design, e2e test instructions
-6. `LICENSE` — MIT
-7. GitHub repo `clankercode/pi-questionnaire` (public)
+## Slice 1 — Foundation: tool rename, new schema, drop aliases
 
-## Architecture
+**Goal:** Rename `ask_user` → `AskUserQuestion`, replace schema with the v2 shape (5 types, no `required`, no `input_mode`/`multi_select`/`prompt` aliases), keep the existing TUI rendering working for the new types.
 
-### Question types
+**Why first:** Lets us land the API break + green tests without having to design the new TUI yet. Everything else builds on this.
 
-Inspired by pag-server v2 (`single_select`, `multi_select`, `text`) and
-extended with the common gap-fillers that come up in agent UIs:
+**Files:**
+- `src/types.ts` — new types (5 QuestionType literals, BatchState, AskUserQuestionParams, etc.)
+- `src/schema.ts` — new AskUserQuestionParams (no aliases, no `required`, description optional, max 7 options to leave room for auto-Other)
+- `src/normalize.ts` — new normalization (no aliases, confirm_enum auto-fills Affirm/Decline)
+- `src/answers.ts` — validateAgainstQuestions handles new types
+- `src/index.ts` — rename tool to AskUserQuestion, register AskUserQuestionParams, result shape uses new AnswerValue discriminated union
 
-| Type          | UI                          | Output                          | Notes                                |
-|---------------|-----------------------------|---------------------------------|--------------------------------------|
-| `single_select` | List, arrow + Enter       | chosen option value (string)    | Up to 8 options; "Other" auto-added  |
-| `multi_select`  | Checkbox list, Space toggles | array of chosen values        | Same limits                          |
-| `text`          | Inline editor              | free string                    | multiline or single-line             |
-| `confirm`       | Yes/No list                | `true` or `false`              | Always 2 options                     |
-| `number`        | Inline editor with up/down | integer (or float)             | Honors min/max; arrow keys nudge     |
+**TDD steps:**
+1. RED: `tests/test_schema.py` adds cases that:
+   - accept `AskUserQuestion` with `select_one` / `select_many` / `confirm_enum` / `number` / `free_text`
+   - reject old `single_select` / `multi_select` / `text` / `confirm` / `number` type names
+   - reject `required` field
+   - reject `prompt` / `input_mode` / `multi_select` aliases
+   - require `header` and `description` (description can be empty string)
+   - cap options at 7
+2. GREEN: rewrite `src/types.ts` and `src/schema.ts` to match.
+3. RED: `tests/test_normalize.py` adds:
+   - confirm_enum with no options auto-fills to `[{label:"Affirm"},{label:"Decline"}]` + auto-Other
+   - select_one/select_many auto-append Other (cap at 7 + Other = 8)
+   - number/free_text error if `options` is present
+   - default must equal one normalized option label (select_one) or be a list (select_many) or "affirm"/"decline" (confirm_enum)
+4. GREEN: rewrite `src/normalize.ts`.
+5. RED: `tests/test_answers.py` adds:
+   - validateAgainstQuestions handles confirm_enum (boolean), number (number), free_text (string), select_one (string), select_many (string[])
+6. GREEN: update `src/answers.ts`.
+7. Update `src/index.ts` to register the new tool and use the new result shape (AnswerValue, lifecycle, notes, url, port).
+8. Update `src/tui.ts` minimally to render the 5 new types (we'll redesign in slice 2; this slice just keeps things working).
+9. Update `tests/harness.ts` to handle the new shape.
+10. Run all tests, commit.
 
-### Per-question metadata
+**Acceptance:**
+- All existing pytest/node/bash e2e tests pass after updating their payloads to the new types
+- A v1 payload fails schema validation with a clear "multi_select → select_many" message
+- Tool name is exactly `AskUserQuestion` (capital A, U, Q)
 
-```ts
-{
-  id: string,                  // unique
-  header?: string,             // short tab label (max 20 chars)
-  question: string,            // full prompt text
-  type: 'single_select' | 'multi_select' | 'text' | 'confirm' | 'number',
-  options?: Array<{            // for single/multi-select
-    label: string,
-    description?: string,
-    preview?: { type: 'markdown'|'mermaid'|'svg'|'code', content: string }
-  }>,
-  default?: string | string[] | number | boolean,
-  required?: boolean,          // default true
-  min?: number, max?: number,  // for number
-  placeholder?: string,        // for text
-  multiline?: boolean,         // for text
-}
-```
+## Slice 2 — TUI redesign: notes, checkmarks, preview, "Other" revisit, keymap
 
-### Canonical output shape (pag-server v2 compatible)
+**Goal:** Full new TUI matching §4 of the spec.
 
-```ts
-{
-  "0": "Staging",            // single_select
-  "1": ["A", "B"],            // multi_select
-  "2": "free text",           // text
-  "3": true,                  // confirm
-  "4": 42                     // number
-}
-```
+**Files:**
+- `src/tui.ts` — major rewrite
 
-Plus optional per-question notes:
-```ts
-{ "0": "context for answer 0" }
-```
+**TDD steps:**
+1. RED: `tests/test_tui_render.mjs` adds snapshots for:
+   - persistent checkmarks after returning to a question (`select_one` shows `✓ 1. Red`)
+   - `select_many` shows `☑ 2. Blue` for selected
+   - notes editor shows "Notes for <header>:" prompt when toggled
+   - "Other" revisit shows `✎ Other` + prepopulated editor content
+   - preview expansion (`e`) shows full markdown/code content
+   - help overlay shows all keybindings
+2. GREEN: implement each piece in `src/tui.ts`.
+3. Wire all 5 types' widgets per spec §4.
+4. Implement keymap:
+   - `1`–`9` selects option on choice questions (clamped to options.length - 1)
+   - `Meta+1`–`Meta+4` jumps tab (Alt on Linux/Win, Option on macOS)
+   - `[` / `]` for tab nav (fallback)
+   - `Tab` / `n` toggle notes
+   - `e` toggle preview
+   - `o` open browser URL (calls out to URL handler; in tests, mocks spawn)
+   - `?` show help
+5. Render check: each test snapshot matches.
 
-### UI shell (tabbed when multi-question)
+**Acceptance:**
+- `pnpm test` passes (node --test on test_tui_render.mjs)
+- pytest passes (no schema/normal regressions)
+- All 5 types render with checkmarks, persistent state survives tab switches
+- Notes editor swaps via Tab; `n` works as fallback
+- 1-9 selects option index, Meta+1-4 jumps tab
 
-- Single question: simple option list / editor
-- Multi question: tab bar (□/■ for unanswered/answered), ←/→/Tab to switch, Enter to submit on the ✓ Submit tab when all answered
-- Each tab has full render: question text, options, descriptions, previews (markdown rendered as plain text for now; mermaid/svg marked as "(mermaid diagram — not rendered in v1)")
-- Esc cancels the whole questionnaire; answer map is empty
-- 4th question limit per single tool call (pag-server uses no hard cap; we cap at 4 here per user request)
+## Slice 3 — Hand-rolled mermaid renderer
 
-### Headless mode (for e2e tests)
+**Goal:** Mermaid preview in TUI shows ASCII art for simple `graph TD`/`graph LR`; raw + link fallback for everything else.
 
-`ctx.mode !== "tui"` OR `process.env.PI_QUESTIONNAIRE_ANSWERS_FILE` is set:
-- If `PI_QUESTIONNAIRE_ANSWERS_FILE` is set, read JSON `{"0": "Staging", "1": [...]}` from it; treat as if the user picked those values; skip the TUI.
-- If unset and `ctx.mode !== "tui"`, return a clear error: "Error: questionnaire requires interactive mode (or set PI_QUESTIONNAIRE_ANSWERS_FILE=<path>)".
-- This makes tmux + `pi --print` deterministic.
+**Files:**
+- `src/mermaid.ts` — new
 
-### Lifecycle states (mirrors pag-server adapter contract)
+**TDD steps:**
+1. RED: `tests/test_mermaid.py` (new) with cases:
+   - `graph TD\n  A --> B` renders as ASCII with two boxes and an arrow
+   - `graph LR` renders the same way as TD (per spec)
+   - `graph TD\n  A[Label] --> B{Decision}` renders with multi-word labels
+   - empty input → empty output
+   - non-graph mermaid (sequence, class) → fallback to raw
+2. GREEN: implement the parser. Naive line-by-line scanner: detect `graph TD/LR` header, then for each `A --> B` line, place nodes in a left-to-right grid and connect with ASCII arrow.
+3. Try `mermaid-ascii` package first; if not installed, use hand-rolled. (Test both paths with mock.)
 
-- `requested` — tool execution starts
-- `answered` — all required questions answered
-- `cancelled` — user pressed Esc
-- `timed_out` — (future: if timeout is added)
-- `rejected` — invalid input attempted (e.g. out-of-range number); re-asks
+**Acceptance:**
+- New pytest cases pass
+- Output looks visually reasonable (manually inspect for a few inputs)
 
-## Acceptance criteria
+## Slice 4 — Live question count in renderCall
 
-- [ ] `ask_user` tool registered; `--print pi -e ./src/index.ts` loads it
-- [ ] All 5 question types render in TUI and produce correct canonical output
-- [ ] Tabs work for multi-question; submit tab enforces all-answered
-- [ ] Headless mode (`PI_QUESTIONNAIRE_ANSWERS_FILE=...`) skips TUI and returns the file's answer map
-- [ ] `pytest tests/` passes (schema, normalize, answers, headless, edge cases)
-- [ ] `node --test` passes (TUI render snapshots)
-- [ ] `bash tests/test_e2e_pi.sh` runs `pi --print` end-to-end with a real
-      model, captures transcript, asserts answer map matches expected
-- [ ] Public repo `clankercode/pi-questionnaire` exists with README/LICENSE
-- [ ] Clean `git log` with regular commits
-- [ ] Backward compat: pag-server v1 question shape (`{ question, options: [{label}] }`) is also accepted
+**Goal:** TUI tool-call message shows question count as the LLM streams the args (e.g. `AskUserQuestion 2 questions`).
 
-## Out of scope (v1)
+**Files:**
+- `src/scanner.ts` — new (quote-aware JSON object counter)
+- `src/index.ts` — subscribe to message_update, invalidate renderCall
 
-- Real mermaid/svg rendering (we just mark them as "preview attached")
-- Cross-process synchronization for in-flight questionnaires (sessions are local)
-- Timeouts (could be added later)
-- A standalone HTTP service to receive answers (pag-server does this; for pi it's local)
+**TDD steps:**
+1. RED: `tests/test_scanner.py` (new) with cases:
+   - count `{}` braces inside `questions: [...]` array, ignoring braces inside string values
+   - handles split tokens: `{"a":"b","c` then `":"d"}` should not double-count
+   - handles escape sequences: `{"a":"with } brace"}` should count only outer `{}`
+   - count is "0" or "unknown" until we have at least one complete object
+2. GREEN: implement the scanner.
+3. RED: `tests/test_index.py` or extension test: simulate message_update, verify renderCall text contains the count.
+4. GREEN: wire into `src/index.ts` (no actual pi runtime — test by exporting a `createLiveCountUpdater()` factory that we mock-invoke).
 
-## Open questions
+**Acceptance:**
+- Live count works in unit test
+- Real pi integration deferred to slice 8 (no harness for it)
 
-- Which model string works reliably for `pi --print --model <m>` headless? → record in tests/MODEL_NOTES.md
-- Should we ship a `parse_answers.ts` for agents that want to read session tool-result `details` back as canonical answers? → yes, expose as helper
+## Slice 5 — HTTP server + WebSocket
 
-## Reviewer prompts
+**Goal:** Standalone HTTP server in `src/server.ts` with port manager, state model, routes, WebSocket. TUI is not wired to it yet — that's slice 8.
 
-- **Correctness critic**: check schema validation, normalization, answer parsing for pag-server compat
-- **Goal-fit critic**: did we cover single_select, multi_select, text, confirm, number? Rich = previews + descriptions
-- **Edge-case critic**: out-of-range numbers, empty options, "Other" with empty text, multiline, unicode, large option lists (8 limit), 4-question cap
-- **Integration critic**: do the schema, normalize, tui, and headless paths all agree on canonical output?
+**Files:**
+- `src/port.ts` — new (sticky port allocation)
+- `src/server.ts` — new (HTTP + WebSocket)
+- `package.json` — add `ws` dependency
+
+**TDD steps:**
+1. RED: `tests/test_port.py` (new):
+   - allocatePort() returns a number in [30000, 60000]
+   - second call in same process returns same port (sticky)
+   - if first port is occupied, +1 retry
+2. GREEN: implement `src/port.ts`.
+3. RED: `tests/test_server.py` (new):
+   - server starts on first createServer()
+   - GET `/q/<id>?nonce=<x>` returns HTML page
+   - GET `/q/<id>/state?nonce=<x>` returns JSON state
+   - POST `/q/<id>/answer?nonce=<x>` with `{index, value, kind:"answer"}` updates state
+   - POST `/q/<id>/submit?nonce=<x>` sets lifecycle to "submitted"
+   - POST `/q/<id>/cancel?nonce=<x>` sets lifecycle to "cancelled"
+   - nonce mismatch returns 401
+   - WebSocket connection receives initial state, then patches on update
+   - Multiple WebSocket clients: a patch sent via one reaches the others
+4. GREEN: implement `src/server.ts` using `http` + `ws`.
+5. Add `ws` to `package.json` and run `pnpm install`.
+
+**Acceptance:**
+- All new server tests pass
+- Server can be started/stopped cleanly
+- State model has all fields per spec §5.3
+
+## Slice 6 — Browser page (no vendor libs yet)
+
+**Goal:** HTML page served from the server, basic per-type widgets, raw previews, WebSocket client.
+
+**Files:**
+- `src/browser/template.html` — new (single self-contained file)
+- `src/browser/render.ts` — new (replaces placeholders in the template)
+
+**TDD steps:**
+1. RED: `tests/test_browser.py` (new):
+   - GET `/q/<id>?nonce=<x>` returns HTML containing: the question headers, all option labels, the right widget element for each type (radio/checkbox/input/textarea), a Submit button, a WebSocket script tag with the right URL
+   - HTML escapes user-supplied text (no XSS via option labels)
+   - Notes textarea is present per question
+2. GREEN: build the template with placeholders; implement render.ts to substitute questions, options, batch id, nonce, port.
+3. Test WebSocket flow end-to-end: connect, send `{type:"answer",index:0,value:"A"}`, verify server state, verify second client receives a patch.
+
+**Acceptance:**
+- HTML page renders all 5 types
+- WebSocket submit closes the questionnaire
+- No XSS via label/question/description text
+
+## Slice 7 — Vendor cache + browser previews
+
+**Goal:** Markdown (marked), code (highlight.js), mermaid (mermaid.js) downloaded once and cached in `~/.cache/pi-questionnaire/vendor/`. Browser page renders them.
+
+**Files:**
+- `src/vendor.ts` — new (download + cache)
+- `src/browser/template.html` — wires in vendor scripts
+
+**TDD steps:**
+1. RED: `tests/test_vendor.py` (new):
+   - ensureVendored(url, dest) downloads if missing, returns cached file if present
+   - if URL changes, downloads new version (per spec: "Dependency URLs must be version-pinned"; we use one URL per lib, no upgrade probe in v2)
+   - if download fails, throws with clear error
+2. GREEN: implement `src/vendor.ts`.
+3. Update `src/browser/template.html` to:
+   - on page load, fetch `/vendor/marked.js`, `/vendor/highlight.js`, `/vendor/mermaid.js`
+   - the server serves these from the cache, falling back to the network on first use
+   - in the browser, marked/highlight/mermaid auto-render `<pre class="...">` blocks
+4. Test: open a batch with markdown preview, verify the HTML includes the rendered output (or the script tag is there if rendering is client-side).
+
+**Acceptance:**
+- First use: server downloads, browser fetches
+- Subsequent uses: instant (cached)
+- All preview types render in the browser
+
+## Slice 8 — TUI ↔ browser sync
+
+**Goal:** TUI subscribes to server events, debounces content changes, auto-switches tab on focus change, opens browser URL on `o`.
+
+**Files:**
+- `src/tui.ts` — add WebSocket client, debouncer
+- `src/index.ts` — wire server lifecycle to TUI
+
+**TDD steps:**
+1. RED: `tests/test_tui_render.mjs` adds:
+   - when WebSocket emits `state` with focus=N, TUI switches to question N
+   - when WebSocket emits `patch` with field="answer" + index, TUI marks question answered
+   - debouncer: rapid `patch` events coalesce; only the last one applies after 3s
+2. GREEN: implement WS client in TUI; debouncer; auto-tab.
+3. RED: `tests/test_e2e_browser_sync.py` (new, headless e2e):
+   - spawn the tool, get a URL
+   - open WebSocket to the URL
+   - send `{type:"answer", index:0, value:{mode:"option",value:"Staging"}}`
+   - verify TUI receives the patch within 3s + 1s grace
+4. GREEN: implement integration in `src/index.ts`.
+
+**Acceptance:**
+- TUI auto-switches tab on browser focus
+- TUI shows browser-submitted answers after 3s
+- Submit/cancel from browser closes TUI
+
+## Slice 9 — Documentation + final review
+
+**Goal:** README, USAGE, ARCHITECTURE reflect v2; PIRFL review pass.
+
+**Files:**
+- `README.md` — update tool name, new types, new URL flow
+- `docs/USAGE.md` — new types, examples, keybindings
+- `docs/ARCHITECTURE.md` — HTTP server, WebSocket, TUI canonical, browser mirror
+
+**Steps:**
+1. Update each doc to reflect v2.
+2. Add migration table from v1 to v2 in USAGE.
+3. Run full test suite (pytest + node --test + bash e2e + browser-sync e2e).
+4. PIRFL review pass (codex or fresh claude).
+5. Fix any blockers/majors.
+6. Merge to master, push, update changelog.
+
+## Out of scope (v3+)
+
+- Real auth (OAuth, session tokens, etc.)
+- Cross-device sync
+- HTML in TUI rendering
+- Timeouts
+- Persistent server across pi restarts
+- Plugin-level configuration of the HTTP server
+- Multi-user collaboration
+- A `cmd-shift-r` to re-render TUI from server state
+
+## Slice ordering rationale
+
+Slices 1–2 are the schema/TUI core and can land without a network. Slices 3–4 are isolated utilities. Slices 5–7 are the HTTP/browser stack. Slice 8 wires them together. Slice 9 is docs + review. This ordering lets us keep tests green at every step and ship a working tool at any slice boundary.

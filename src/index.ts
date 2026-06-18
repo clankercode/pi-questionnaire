@@ -1,35 +1,46 @@
 // src/index.ts
-// Pi extension entry point. Registers the `ask_user` tool.
+// Pi extension entry point. Registers the `AskUserQuestion` tool (v2).
+// v2 surface: 5 question types, browser-sync URL, notes, persistent checkmarks.
+// HTTP server + WebSocket + browser page land in slice 5+.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-import { AskUserParams, validateSemantics } from "./schema.ts";
+import { AskUserQuestionParams, validateSemantics } from "./schema.ts";
 import { normalizeQuestions } from "./normalize.ts";
 import { buildQuestionnaireComponent, type TuiResult } from "./tui.ts";
-import { isHeadless, loadHeadlessAnswers } from "./headless.ts";
 import type { AnswerMap, CanonicalQuestion, ToolResultDetails } from "./types.ts";
 
-const NO_QUESTIONS_DETAILS = (
+function formatAnswers(
 	questions: CanonicalQuestion[],
-	reason: string,
-): { content: { type: "text"; text: string }[]; details: ToolResultDetails } => ({
-	content: [{ type: "text", text: reason }],
-	details: { questions, answers: {}, cancelled: true, lifecycle: "rejected" },
-});
-
-function formatAnswers(questions: CanonicalQuestion[], answers: AnswerMap, notes?: Record<string, string>) {
+	answers: AnswerMap,
+	notes?: Record<string, string>,
+): string {
 	const lines: string[] = [];
 	for (let i = 0; i < questions.length; i++) {
 		const q = questions[i];
 		const v = answers[String(i)];
-		if (v === undefined || v === "") continue;
+		if (v === undefined) continue;
 		const lbl = q.header;
-		if (Array.isArray(v)) {
-			lines.push(`${lbl}: ${v.join(", ")}`);
+		let display: string;
+		if (typeof v === "object" && v !== null && !Array.isArray(v) && "mode" in v) {
+			const obj = v as { mode: string; value?: unknown; text?: string };
+			if (obj.mode === "option") display = String(obj.value);
+			else if (obj.mode === "other") display = `(Other) ${obj.text}`;
+			else display = JSON.stringify(v);
+		} else if (Array.isArray(v)) {
+			display = v
+				.map((e) =>
+					typeof e === "object" && e !== null && "mode" in e
+						? e.mode === "option"
+							? (e as { value: string }).value
+							: `(Other) ${(e as { text: string }).text}`
+						: String(e),
+				)
+				.join(", ");
 		} else {
-			lines.push(`${lbl}: ${v}`);
+			display = String(v);
 		}
+		lines.push(`${lbl}: ${display}`);
 	}
 	if (notes) {
 		for (const [k, v] of Object.entries(notes)) {
@@ -43,141 +54,143 @@ function formatAnswers(questions: CanonicalQuestion[], answers: AnswerMap, notes
 
 function renderCallText(questions: CanonicalQuestion[], theme: any) {
 	const labels = questions.map((q) => q.header).join(", ");
-	let text = theme.fg("toolTitle", theme.bold("ask_user "));
+	let text = theme.fg("toolTitle", theme.bold("AskUserQuestion "));
 	text += theme.fg("muted", `${questions.length} question${questions.length !== 1 ? "s" : ""}`);
 	if (labels) text += theme.fg("dim", ` (${labels})`);
 	return text;
 }
 
-function renderResultText(
-	details: ToolResultDetails,
-	theme: any,
-): string {
+function renderResultText(details: ToolResultDetails, theme: any): string {
 	if (details.lifecycle === "cancelled") {
 		return theme.fg("warning", "Cancelled");
 	}
 	if (details.lifecycle === "rejected") {
 		return theme.fg("error", "Rejected (see tool result)");
 	}
-	const lines = details.questions.map((q, i) => {
+	const lines: string[] = [];
+	for (let i = 0; i < details.questions.length; i++) {
+		const q = details.questions[i];
 		const v = details.answers[String(i)];
-		if (v === undefined || v === "") return null;
-		if (Array.isArray(v)) {
-			return `${theme.fg("success", "✓ ")}${theme.fg("accent", q.header)}: ${v.join(", ")}`;
+		if (v === undefined) continue;
+		let display: string;
+		if (typeof v === "object" && v !== null && !Array.isArray(v) && "mode" in v) {
+			const obj = v as { mode: string; value?: unknown; text?: string };
+			if (obj.mode === "option") display = String(obj.value);
+			else if (obj.mode === "other") display = `(Other) ${obj.text}`;
+			else display = JSON.stringify(v);
+		} else if (Array.isArray(v)) {
+			display = v
+				.map((e) =>
+					typeof e === "object" && e !== null && "mode" in e
+						? e.mode === "option"
+							? (e as { value: string }).value
+							: `(Other) ${(e as { text: string }).text}`
+						: String(e),
+				)
+				.join(", ");
+		} else {
+			display = String(v);
 		}
-		return `${theme.fg("success", "✓ ")}${theme.fg("accent", q.header)}: ${v}`;
-	}).filter((l): l is string => l !== null);
+		lines.push(
+			`${theme.fg("success", "✓ ")}${theme.fg("accent", q.header)}: ${display}`,
+		);
+	}
 	return lines.join("\n");
 }
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "ask_user",
-		label: "Ask User",
+		name: "AskUserQuestion",
+		label: "AskUserQuestion",
 		description:
 			"Ask the user one or more questions (max 4 per call) and collect structured answers. " +
-			"Supports single_select, multi_select, text, confirm, and number question types. " +
-			"Each option can carry a description and a rich preview (markdown/mermaid/svg/code). " +
+			"Supports select_one, select_many, confirm_enum, number, and free_text question types. " +
+			"Each option can carry a description and a rich preview (markdown/code/mermaid/svg/html). " +
 			"Use for clarifying requirements, getting preferences, or confirming decisions. " +
-			"Returns a canonical answer map: { \"0\": \"Staging\", \"1\": [\"A\",\"B\"], ... } — pag-server v2 compatible.",
+			"Returns a canonical answer map: { \"0\": {mode, value}, \"1\": [...], ... }.",
 		promptSnippet: "Ask the user one or more questions and collect structured answers",
 		promptGuidelines: [
-			"Use ask_user when you need structured input from the user (preferences, decisions, confirmations) before proceeding.",
-			"Prefer ask_user for choices and confirmations; use plain text in chat for open-ended discussion.",
-			"Each call can include 1 to 4 questions; for longer forms, break them into multiple ask_user calls.",
-			"For single_select / multi_select, provide 2 to 8 options with concise labels and useful descriptions.",
-			"Add a preview (markdown/mermaid/svg/code) when an option needs to show a code sample, diagram, or formatted spec.",
-			"Use confirm for yes/no questions; use number for integer input with optional min/max; use text for free-form input.",
+			"Use AskUserQuestion when you need structured input from the user (preferences, decisions, confirmations) before proceeding.",
+			"Prefer AskUserQuestion for choices and confirmations; use plain text in chat for open-ended discussion.",
+			"Each call can include 1 to 4 questions; for longer forms, break them into multiple AskUserQuestion calls.",
+			"For select_one / select_many, provide 2 to 7 options with concise labels and useful descriptions. The 'Other' option is auto-appended.",
+			"Add a preview (markdown/code/mermaid/svg/html) when an option needs to show a code sample, diagram, or formatted spec.",
+			"Use confirm_enum for yes/no/other questions; use number for integer/numeric input with optional min/max; use free_text for free-form input (always multiline).",
 		],
-		parameters: AskUserParams,
+		parameters: AskUserQuestionParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// 1. Semantic validation
 			const sem = validateSemantics(params);
 			if (!sem.ok) {
-				return NO_QUESTIONS_DETAILS([], `Error: ${sem.reason}`);
+				return {
+					content: [{ type: "text", text: `Error: ${sem.reason}` }],
+					details: { questions: [], answers: {}, lifecycle: "rejected" },
+				};
 			}
-			// 2. Normalize questions into canonical v2 shape
+			// 2. Normalize questions
 			let questions: CanonicalQuestion[];
 			try {
-				questions = normalizeQuestions(params.questions as unknown as CanonicalQuestion[]);
+				questions = normalizeQuestions(params.questions as never);
 			} catch (err) {
-				return NO_QUESTIONS_DETAILS([], `Error: ${(err as Error).message}`);
-			}
-
-			// 3. Headless path — env var set, skip TUI
-			if (isHeadless()) {
-				const result = await loadHeadlessAnswers(questions);
-				if (!result.ok) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Error loading headless answers from ${result.source}: ${result.errors.join("; ")}`,
-							},
-						],
-						details: {
-							questions,
-							answers: result.answers,
-							...(result.notes ? { notes: result.notes } : {}),
-							cancelled: false,
-							lifecycle: "rejected",
-						},
-					};
-				}
 				return {
-					content: [
-						{
-							type: "text",
-							text: `[headless] ${formatAnswers(questions, result.answers, result.notes)}`,
-						},
-					],
-					details: {
-						questions,
-						answers: result.answers,
-						...(result.notes ? { notes: result.notes } : {}),
-						cancelled: false,
-						lifecycle: "answered",
-					},
+					content: [{ type: "text", text: `Error: ${(err as Error).message}` }],
+					details: { questions: [], answers: {}, lifecycle: "rejected" },
 				};
 			}
 
-			// 4. Non-tui mode (--print etc) — TUI unavailable
+			// 3. Non-tui mode (--print etc) — TUI unavailable. The browser
+			// path lands in slice 5+.
 			if (ctx.mode !== "tui") {
 				return {
 					content: [
 						{
 							type: "text",
 							text:
-								"Error: ask_user requires interactive (tui) mode. " +
-								"Set PI_QUESTIONNAIRE_ANSWERS_FILE=/path/to/answers.json to drive the tool headlessly in non-tui mode.",
+								"Error: AskUserQuestion requires interactive (tui) mode. " +
+								"(Browser-driven headless mode lands in a later slice.)",
 						},
 					],
-					details: { questions, answers: {}, cancelled: true, lifecycle: "cancelled" },
+					details: { questions, answers: {}, lifecycle: "cancelled" },
 				};
 			}
 
-			// 5. Interactive TUI
+			// 4. Interactive TUI
 			const factory = buildQuestionnaireComponent({ questions });
-			const result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) => factory(tui, theme, kb, done));
+			const result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) =>
+				factory(tui, theme, kb, done),
+			);
 
-			if (!result || result.cancelled) {
+			if (!result || result.lifecycle === "cancelled") {
 				return {
 					content: [{ type: "text", text: "User cancelled the questionnaire" }],
-					details: { questions, answers: {}, cancelled: true, lifecycle: "cancelled" },
+					details: {
+						questions,
+						answers: {},
+						lifecycle: "cancelled",
+					},
 				};
 			}
 
-			// Convert array-of-answers back into the canonical AnswerMap shape.
+			// Convert array-of-answers back into the AnswerMap shape.
 			const answers: AnswerMap = {};
 			for (let i = 0; i < questions.length; i++) {
 				const a = result.answers.find((x) => x.id === questions[i].id);
-				if (!a) continue;
-				answers[String(i)] = a.value as never;
+				if (a) answers[String(i)] = a.value;
 			}
 			return {
-				content: [{ type: "text", text: formatAnswers(questions, answers) }],
-				details: { questions, answers, cancelled: false, lifecycle: "answered" },
+				content: [
+					{
+						type: "text",
+						text: formatAnswers(questions, answers, result.notes),
+					},
+				],
+				details: {
+					questions,
+					answers,
+					...(result.notes ? { notes: result.notes } : {}),
+					lifecycle: "answered",
+				},
 			};
 		},
 
