@@ -210,7 +210,30 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
 		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
 		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
+		assert.match(page.text, /function renderPreview/);
+		assert.match(page.text, /function renderMarkdown/);
+		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
 	} finally {
+		await handle.stop();
+	}
+});
+
+test("reconnected websocket receives latest full state snapshot", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	let first;
+	let second;
+	try {
+		first = await connectWs(handle);
+		await first.nextMessage("state");
+		first.send({ type: "answer", questionId: "color", value: "Blue" });
+		await first.nextMessage("answers");
+		first.close();
+		second = await connectWs(handle);
+		const state = await second.nextMessage("state");
+		assert.deepEqual(state.answers, { "0": { mode: "option", value: "Blue" } });
+	} finally {
+		first?.close();
+		second?.close();
 		await handle.stop();
 	}
 });
