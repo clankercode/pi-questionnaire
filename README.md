@@ -128,7 +128,7 @@ pnpm test:py
 # TUI render snapshots (9 cases via node --test)
 npx tsx --test tests/test_tui_render.mjs
 
-# Full e2e (4 scenarios via tmux + pi --print, ~3 min)
+# Full e2e (6 scenarios via tmux + pi --print, ~5 min)
 bash tests/test_e2e_pi.sh
 
 # All of the above
@@ -155,8 +155,8 @@ tests/
   test_normalize.py # 11 cases
   test_answers.py   # 18 cases
   test_headless.py  # 8 cases
-  test_tui_render.mjs  # 9 cases
-  test_e2e_pi.sh    # 4 e2e scenarios via pi --print
+  test_tui_render.mjs  # 15 cases
+  test_e2e_pi.sh    # 6 e2e scenarios via pi --print
   MODEL_NOTES.md    # which models work for e2e
 docs/
   ARCHITECTURE.md
