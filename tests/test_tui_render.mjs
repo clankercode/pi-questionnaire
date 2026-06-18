@@ -655,21 +655,53 @@ test("select_one Other: editor opens inline when cursor lands on Other", () => {
 	assert.match(lines, /┌/);
 });
 
-test("`o` key records a browser open attempt (slice 5+ will hook up xdg-open)", () => {
-	const { component, getDone } = drive([{
+test("`o` key records a browser open attempt and calls the open handler", () => {
+	const { component } = drive([{
 		header: "h", question: "q?", type: "select_one",
 		options: [{ label: "A" }],
 	}]);
-	// Wire up browser URL via the setBrowserUrl API exposed by the factory
+	const opened = [];
 	component.setBrowserUrl("http://localhost:54321/q/abc?nonce=xyz");
-	// Render to check URL is shown
+	component.setBrowserOpenHandler((url) => opened.push(url));
 	let lines = component.render(80).join("\n");
 	assert.match(lines, /http:\/\/localhost:54321/);
-	// Press o to record the attempt
+	assert.doesNotMatch(lines, /slice 5\+/);
 	component.handleInput("o");
 	const attempt = component.getBrowserOpenAttempt();
 	assert.ok(attempt, "browser open attempt should be recorded");
 	assert.equal(attempt.url, "http://localhost:54321/q/abc?nonce=xyz");
+	assert.deepEqual(opened, ["http://localhost:54321/q/abc?nonce=xyz"]);
+});
+
+test("browser-origin tab and answer updates debounce TUI refresh", async () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },
+		{ id: "b", header: "b", question: "B?", type: "free_text" },
+	]);
+	let renderCount = 0;
+	let doneValue = null;
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(
+		{ ...makeFakeTui(), requestRender: () => { renderCount += 1; } },
+		fakeTheme,
+		{},
+		(v) => { doneValue = v; },
+	);
+
+	component.applyBrowserTab(1);
+	component.applyBrowserAnswer("b", "hello from browser");
+	assert.equal(renderCount, 0, "browser activity should not refresh the TUI immediately");
+	assert.equal(component.getBrowserState().currentTab, 1);
+	assert.deepEqual(component.getBrowserState().answers, { "1": "hello from browser" });
+
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(renderCount, 1, "one idle refresh should fire after the debounce window");
+	component.applyBrowserSubmit();
+	assert.equal(doneValue.lifecycle, "answered");
 });
 
 test("Meta+1 jumps to question 1 (multi-question)", () => {
