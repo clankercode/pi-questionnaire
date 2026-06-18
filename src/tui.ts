@@ -414,6 +414,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (q.type !== "select_many") return;
 			const opts = getRenderOptions(q);
 			const opt = opts[idx];
+			if (!opt) return;
 			if (opt?.isOther) {
 				// Other on multi_select opens the editor so the user can type
 				// a custom value (committed as {mode:"other", text}). Same UX
@@ -429,9 +430,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (set.has(idx)) set.delete(idx);
 			else set.add(idx);
 			checked[q.id] = set;
-			const arr: { mode: "option"; value: string }[] = [];
+			const arr: ChoiceAnswer[] = [];
 			for (const i of set) {
 				if (!opts[i].isOther) arr.push({ mode: "option", value: opts[i].label });
+			}
+			const existing = answers.get(q.id)?.value;
+			if (Array.isArray(existing)) {
+				const otherEntry = existing.find(
+					(e) => typeof e === "object" && e !== null && (e as { mode?: string }).mode === "other",
+				) as ChoiceAnswer | undefined;
+				if (otherEntry) arr.push(otherEntry);
 			}
 			saveAnswer(q, arr as AnswerValue);
 			refresh();
@@ -936,13 +944,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 
 			const q = currentQuestion()!;
-			lines.push(theme.fg("accent", theme.bold(q.header)));
-			lines.push(theme.fg("text", q.question));
-			if (q.description) {
-				lines.push("");
-				addWrapped(lines, theme.fg("muted", q.description), width);
-			}
-			lines.push("");
 
 			// is_dangerous confirmation editor. Renders BEFORE the type-
 			// specific UI so the warning header replaces the normal header
@@ -976,6 +977,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);
 				return lines;
 			}
+
+			lines.push(theme.fg("accent", theme.bold(q.header)));
+			lines.push(theme.fg("text", q.question));
+			if (q.description) {
+				lines.push("");
+				addWrapped(lines, theme.fg("muted", q.description), width);
+			}
+			lines.push("");
 
 			// Notes mode for this question
 			if (viewMode === "notes") {
