@@ -14,17 +14,20 @@
     "test:all": "npm run test:py && bash tests/test_e2e_pi.sh"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "@earendil-works/pi-ai": "*",
     "typebox": "^1.1.0"
   },
   "devDependencies": {
+    "@types/node": "^25.9.3",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "license": "MIT"
 }
