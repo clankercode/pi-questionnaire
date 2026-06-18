@@ -210,6 +210,7 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
 		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
 		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
+		assert.match(page.text, /if\(terminalLifecycle\) return/);
 		assert.match(page.text, /function renderPreview/);
 		assert.match(page.text, /function renderMarkdown/);
 		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
