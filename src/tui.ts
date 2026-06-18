@@ -17,6 +17,7 @@ import {
 import type {
 	AnswerValue,
 	CanonicalQuestion,
+	ChoiceAnswer,
 	ConfirmAnswer,
 	Lifecycle,
 	RenderOption,
@@ -127,6 +128,14 @@ function isOtherSelectedFor(q: CanonicalQuestion, currentValue: AnswerValue | un
 	if (q.type === "select_one" || q.type === "confirm_enum") {
 		return typeof currentValue === "object" && currentValue !== null && !Array.isArray(currentValue) && (currentValue as { mode?: string }).mode === "other";
 	}
+	if (q.type === "select_many") {
+		// For multi-select, "Other is selected" means any element of the
+		// array is an {mode:"other"} entry.
+		if (!Array.isArray(currentValue)) return false;
+		return currentValue.some(
+			(e) => typeof e === "object" && e !== null && (e as { mode?: string }).mode === "other",
+		);
+	}
 	return false;
 }
 
@@ -135,6 +144,13 @@ function getOtherText(q: CanonicalQuestion, currentValue: AnswerValue | undefine
 	if (q.type === "select_one" || q.type === "confirm_enum") {
 		const a = currentValue as { mode?: string; text?: string };
 		return a.mode === "other" ? a.text ?? "" : "";
+	}
+	if (q.type === "select_many") {
+		if (!Array.isArray(currentValue)) return "";
+		const otherEntry = currentValue.find(
+			(e) => typeof e === "object" && e !== null && (e as { mode?: string }).mode === "other",
+		) as { mode?: string; text?: string } | undefined;
+		return otherEntry?.text ?? "";
 	}
 	return "";
 }
@@ -396,11 +412,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		/** Toggle a multi-select option (does NOT submit). */
 		function toggleOption(idx: number, q: CanonicalQuestion) {
 			if (q.type !== "select_many") return;
+			const opts = getRenderOptions(q);
+			const opt = opts[idx];
+			if (opt?.isOther) {
+				// Other on multi_select opens the editor so the user can type
+				// a custom value (committed as {mode:"other", text}). Same UX
+				// shape as select_one / confirm_enum's Other flow.
+				inputMode = "other";
+				inputQuestionId = q.id;
+				const prev = getOtherText(q, answers.get(q.id)?.value);
+				editor.setText(prev);
+				refresh();
+				return;
+			}
 			const set = checked[q.id] ?? new Set<number>();
 			if (set.has(idx)) set.delete(idx);
 			else set.add(idx);
 			checked[q.id] = set;
-			const opts = getRenderOptions(q);
 			const arr: { mode: "option"; value: string }[] = [];
 			for (const i of set) {
 				if (!opts[i].isOther) arr.push({ mode: "option", value: opts[i].label });
@@ -480,10 +508,29 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					refresh();
 					return;
 				}
-				const ans: AnswerValue = q.type === "confirm_enum"
-					? { mode: "other", text: trimmed }
-					: { mode: "other", text: trimmed };
-				saveAnswer(q, ans);
+				if (q.type === "select_many") {
+					// Merge with any existing checked options; drop any prior
+					// Other entry so re-committing doesn't accumulate
+					// duplicates.
+					const cur = answers.get(q.id)?.value;
+					const baseArr = Array.isArray(cur)
+						? (cur.filter(
+								(e) =>
+									typeof e === "object" && e !== null
+									&& (e as { mode?: string }).mode !== "other",
+							) as ChoiceAnswer[])
+						: [];
+					const arr: ChoiceAnswer[] = [
+						...baseArr,
+						{ mode: "other", text: trimmed },
+					];
+					saveAnswer(q, arr as AnswerValue);
+				} else {
+					const ans: AnswerValue = q.type === "confirm_enum"
+						? { mode: "other", text: trimmed }
+						: { mode: "other", text: trimmed };
+					saveAnswer(q, ans);
+				}
 			} else if (inputMode === "free_text") {
 				saveAnswer(q, value);
 			} else if (inputMode === "danger") {
@@ -611,7 +658,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					cancel();
 					return;
 				}
-				return;
+				// Allow nav keys to fall through to the multi-question
+				// tab-nav handlers below. Without this, the user can't
+				// back out of Submit to fix a wrong answer (they'd have
+				// to Esc and re-answer everything). `]` and `0` are
+				// no-ops here (already on Submit).
+				const isMetaJump = data.startsWith("\x1b") && data.length >= 2
+					&& data[1] >= "1" && data[1] <= "4";
+				if (!isMulti || (data !== "[" && data !== "]" && data !== "0" && !isMetaJump)) {
+					return;
+				}
+				// fall through to global keys (none match `[`) then tab nav
 			}
 
 			const q = currentQuestion()!;
@@ -889,8 +946,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			// is_dangerous confirmation editor. Renders BEFORE the type-
 			// specific UI so the warning header replaces the normal header
-			// and the type-specific widget (options, etc.) is skipped. The
-			// editor itself is rendered by the TUI host, not inline.
+			// and the type-specific widget (options, etc.) is skipped.
+			//
+			// The editor is rendered INLINE here (unlike free_text / notes,
+			// where the host renders the editor). Reason: the host only
+			// renders the editor for a known set of inputModes ("free_text",
+			// "notes", "other", "number", "text"). "danger" isn't on that
+			// list, so without inlining the editor the user would type into
+			// a black hole. Inlining guarantees the typed text is echoed so
+			// the user can see what they're confirming.
 			if (isDangerActive(q)) {
 				lines.push(
 					theme.fg("warning", theme.bold(`⚠️  DESTRUCTIVE — ${q.header}`)),
@@ -903,6 +967,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				lines.push("");
 				lines.push(theme.fg("accent", "Type the resource name to confirm:"));
+				lines.push("");
+				// Inline-render the editor so the user sees what they're typing.
+				// The host doesn't render the editor for inputMode === "danger".
+				lines.push(...editor.render(width));
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] confirm  [Esc] cancel"));
 				appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);

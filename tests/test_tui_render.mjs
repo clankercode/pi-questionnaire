@@ -1111,3 +1111,154 @@ test("is_dangerous: is_dangerous=false (or undefined) uses normal free_text beha
 		clearInMemorySettings();
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Regression: `[` on Submit tab used to be dropped (the isOnSubmit
+// early-return swallowed every key except Enter/Esc), so the user
+// couldn't back out of Submit to fix a wrong answer without Esc'ing
+// the whole questionnaire. Now nav keys fall through to the multi-
+// question tab-nav handlers.
+// ---------------------------------------------------------------------------
+test("Submit tab: `[` navigates back to the previous question", () => {
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component } = drive(questions);
+	// Advance to Submit tab via the natural path.
+	component.handleInput("1"); // pick A on q0 → advances
+	component.handleInput("1"); // toggle bug on q1
+	component.handleInput("0"); // jump to Submit tab
+	const linesAtSubmit = component.render(80);
+	assert.match(linesAtSubmit.join("\n"), /Submit answers/, "should be on Submit tab");
+	// Press `[` — should navigate back to Tags (q1), not be dropped.
+	component.handleInput("[");
+	const linesAfterBack = component.render(80);
+	assert.doesNotMatch(
+		linesAfterBack.join("\n"),
+		/Submit answers/,
+		"should have left Submit tab",
+	);
+	assert.match(
+		linesAfterBack.join("\n"),
+		/Tags/,
+		"should be back on the Tags question",
+	);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: danger editor text was not being echoed before this fix.
+// The host only renders the editor for known inputModes ("free_text",
+// "notes", "other", "number", "text") — "danger" wasn't on that list, so
+// without inline-rendering the user typed into a black hole. Now the
+// editor is appended to the render output in the danger branch.
+// ---------------------------------------------------------------------------
+test("is_dangerous: typed text is echoed in the rendered output", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const questions = [{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}];
+		const { component } = drive(questions);
+		// Type characters into the danger editor
+		for (const ch of "production-db") {
+			component.handleInput(ch);
+		}
+		const lines = component.render(80);
+		const joined = lines.join("\n");
+		// The typed text must appear in the rendered output. If the editor
+		// is rendered inline (the fix), this matches; if it isn't, the
+		// prompt is shown but typed text is invisible.
+		assert.match(
+			joined,
+			/production-db/,
+			"typed text should be visible in the danger editor rendering",
+		);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Regression: multi_select Other used to toggle "Other" as a regular option
+// instead of opening the editor to capture custom text. Now: Enter/Space/
+// 1-9 on Other opens the editor; committing typed text adds a
+// {mode:"other", text} entry to the array.
+// ---------------------------------------------------------------------------
+test("multi_select Other: Enter on Other opens the editor and commits typed text as {mode:other}", () => {
+	const questions = [{
+		header: "Tags",
+		question: "Which categories?",
+		type: "select_many",
+		options: [
+			{ label: "bug", description: "Broken." },
+			{ label: "feature", description: "New capability." },
+		],
+	}];
+	const { component, getDone } = drive(questions);
+
+	// Toggle "bug" first (option 1)
+	component.handleInput("1");
+	// Move down to Other (option index 2: bug=0, feature=1, Other=2)
+	component.handleInput("\x1b[B"); // down
+	component.handleInput("\x1b[B"); // down → Other
+	// Enter on Other opens the editor
+	component.handleInput("\r");
+	// Editor should be empty
+	assert.equal(component.getEditorText(), "", "editor opens empty");
+	// Type custom text
+	for (const ch of "needs-investigation") {
+		component.handleInput(ch);
+	}
+	// Enter commits
+	component.handleInput("\r");
+	const v = getDone();
+	assert.ok(v !== null, "Enter on Other must commit and submit (single question)");
+	if (v) {
+		assert.equal(v.lifecycle, "answered");
+		assert.equal(v.answers.length, 1);
+		const ans = v.answers[0].value;
+		assert.ok(Array.isArray(ans), "select_many answer must be an array");
+		if (Array.isArray(ans)) {
+			assert.equal(ans.length, 2, "should have bug + Other");
+			assert.equal(ans[0].mode, "option");
+			assert.equal(ans[0].value, "bug");
+			assert.equal(ans[1].mode, "other");
+			assert.equal(ans[1].text, "needs-investigation");
+		}
+	}
+});
+
+test("multi_select Other: revisit prepopulates the editor with the previous Other text", () => {
+	// For revisit, we need a multi-question setup so the user can navigate
+	// back to the select_many after committing. Two questions: a regular
+	// select_one followed by the multi_select with Other.
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Tags", question: "Which categories?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component, getDone } = drive(questions);
+	// First question: pick A
+	component.handleInput("1"); // A → commits and advances
+	// Second question (select_many): go to Other, type, commit
+	component.handleInput("\x1b[B"); // down → Other
+	component.handleInput("\r"); // open editor
+	for (const ch of "first") component.handleInput(ch);
+	component.handleInput("\r"); // commit
+	// Now on Submit tab. Press `[` to navigate back to the multi_select.
+	// (Regression test: `[` on Submit must work — previously the early
+	// return for non-Enter/Esc keys on Submit blocked navigation.)
+	component.handleInput("[");
+	// Now back on the multi_select. Re-enter Other and check pre-fill.
+	component.handleInput("\x1b[B"); // down → Other
+	component.handleInput("\r"); // open editor
+	assert.equal(
+		component.getEditorText(),
+		"first",
+		"editor pre-fills with previous Other text on revisit",
+	);
+	// Don't commit; just abandon.
+});
