@@ -1,0 +1,37 @@
+# Local env / secrets
+.env
+.envrc
+
+# Node / TS
+node_modules/
+*.tsbuildinfo
+dist/
+build/
+
+# Python (tests)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Test outputs
+tests/transcripts/
+tests/.cache/
+tests/*.log
+tests/*.tmp
+tests/__pycache__/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Worktree scratch
+.worktrees/
+
+# Pi runtime
+.pi/
