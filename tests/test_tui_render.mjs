@@ -499,6 +499,57 @@ test("Tab swaps to notes view; Esc returns to answer view", () => {
 	assert.equal(v.lifecycle, "cancelled");
 });
 
+test("notes typing is visible while editing", () => {
+	const { component } = drive([{
+		header: "h", question: "q?", type: "select_one",
+		options: [{ label: "A" }],
+	}]);
+	component.handleInput("\t");
+	for (const ch of "remember this") component.handleInput(ch);
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /remember this/);
+});
+
+test("notes Enter saves and returns to answer view", () => {
+	const questions = [
+		{ header: "a", question: "A?", type: "select_one", options: [{ label: "Yes" }] },
+		{ header: "b", question: "B?", type: "select_one", options: [{ label: "Go" }] },
+	];
+	const { component, getDone } = drive(questions);
+	component.handleInput("\t");
+	for (const ch of "remember this") component.handleInput(ch);
+	component.handleInput("\r");
+	let lines = component.render(80).join("\n");
+	assert.doesNotMatch(lines, /Notes for/);
+	assert.match(lines, /Note: remember this/);
+	component.handleInput("\r"); // answer q1
+	component.handleInput("\r"); // answer q2
+	component.handleInput("\r"); // submit
+	const v = getDone();
+	assert.ok(v !== null, "expected final submit after saving notes");
+	if (v) {
+		assert.equal(v.lifecycle, "answered");
+		assert.equal(v.notes?.q1 ?? v.notes?.a, "remember this");
+	}
+});
+
+test("notes Tab saves and cycles to the next question tab", () => {
+	const questions = [
+		{ header: "a", question: "A?", type: "select_one", options: [{ label: "Yes" }] },
+		{ header: "b", question: "B?", type: "select_one", options: [{ label: "Go" }] },
+	];
+	const { component } = drive(questions);
+	component.handleInput("\t");
+	for (const ch of "side note") component.handleInput(ch);
+	component.handleInput("\t");
+	let lines = component.render(80).join("\n");
+	assert.match(lines, /B\?/);
+	assert.doesNotMatch(lines, /Notes for "a"/);
+	component.handleInput("[");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /Note: side note/);
+});
+
 test("`n` key is the notes-toggle fallback", () => {
 	const { component } = drive([{
 		header: "h", question: "q?", type: "free_text",
@@ -626,6 +677,25 @@ test("Meta+1 jumps to question 1 (multi-question)", () => {
 	component.handleInput("\x1b1");
 	lines = component.render(80).join("\n");
 	assert.match(lines, /A\?/);
+});
+
+test("Left/Right arrows switch question tabs", () => {
+	const { component } = drive([
+		{ header: "a", question: "A?", type: "free_text" },
+		{ header: "b", question: "B?", type: "free_text" },
+		{ header: "c", question: "C?", type: "free_text" },
+	]);
+	let lines = component.render(80).join("\n");
+	assert.match(lines, /A\?/);
+	component.handleInput("\u001b[C");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /B\?/);
+	component.handleInput("\u001b[C");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /C\?/);
+	component.handleInput("\u001b[D");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /B\?/);
 });
 
 test("preview expansion persists per question; toggles with `e`", () => {
@@ -1195,6 +1265,69 @@ test("Submit tab: `[` navigates back to the previous question", () => {
 	);
 });
 
+test("Submit tab: Left arrow navigates back to the previous question", () => {
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component } = drive(questions);
+	component.handleInput("1"); // pick A on q0
+	component.handleInput("1"); // toggle bug on q1
+	component.handleInput("0"); // jump to Submit tab
+	const linesAtSubmit = component.render(80);
+	assert.match(linesAtSubmit.join("\n"), /Submit answers/, "should be on Submit tab");
+	// Press Left arrow — should navigate back to Tags (q1), same as `[`.
+	component.handleInput("\x1b[D");
+	const linesAfterBack = component.render(80);
+	assert.doesNotMatch(
+		linesAfterBack.join("\n"),
+		/Submit answers/,
+		"Left arrow should leave Submit tab",
+	);
+	assert.match(
+		linesAfterBack.join("\n"),
+		/Tags/,
+		"should be back on the Tags question",
+	);
+});
+
+test("Submit tab: Enter submits all answers when every question is answered", () => {
+	const questions = [
+		{ header: "Note", question: "Anything else?", type: "free_text" },
+		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component, getDone } = drive(questions);
+	component.handleInput("\r"); // open free_text editor
+	for (const ch of "hello world") component.handleInput(ch);
+	let lines = component.render(80).join("\n");
+	assert.match(lines, /hello world/, "typed free_text should be visible while editing");
+	component.handleInput("\r"); // commit free_text
+	component.handleInput(" "); // toggle bug
+	component.handleInput("0"); // jump to Submit tab
+	component.handleInput("\r"); // submit all answers
+	const v = getDone();
+	assert.ok(v !== null, "Enter on Submit should call done() when all answers exist");
+	if (v) {
+		assert.equal(v.lifecycle, "answered");
+		assert.equal(v.answers.find((a) => a.index === 0)?.value, "hello world");
+		assert.deepEqual(v.answers.find((a) => a.index === 1)?.value, [{ mode: "option", value: "bug" }]);
+	}
+});
+
+test("free_text active editor hints only supported controls", () => {
+	const { component } = drive([{
+		header: "Note",
+		question: "Anything else?",
+		type: "free_text",
+	}]);
+	component.handleInput("\r");
+	for (const ch of "hello") component.handleInput(ch);
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /\[Enter\] save answer  Esc close/);
+	assert.doesNotMatch(lines, /Tab notes/);
+	assert.doesNotMatch(lines, /\? help/);
+});
+
 // ---------------------------------------------------------------------------
 // Regression: danger editor text was not being echoed before this fix.
 // The host only renders the editor for known inputModes ("free_text",
@@ -1264,11 +1397,13 @@ test("is_dangerous: warning view replaces the normal header instead of duplicati
 });
 
 // ---------------------------------------------------------------------------
-// Regression: multi_select Other is now an inline text input (no
-// modal). Cursor on Other -> printable chars append to the inline
-// text, Backspace deletes, Enter commits as {mode:"other", text}.
+// Regression: multi_select Other is an inline text input (no modal).
+// Cursor on Other -> printable chars append to the inline text,
+// Backspace deletes, and Enter commits the Other text WITHOUT
+// submitting the whole question. The dedicated [Select] button is the
+// only final submit for the batch.
 // ---------------------------------------------------------------------------
-test("multi_select Other: inline text input — typing and Enter commits as {mode:other}", () => {
+test("multi_select Other: Enter commits text and returns to choices without submitting", () => {
 	const questions = [{
 		header: "Tags",
 		question: "Which categories?",
@@ -1280,47 +1415,38 @@ test("multi_select Other: inline text input — typing and Enter commits as {mod
 	}];
 	const { component, getDone } = drive(questions);
 
-	// Toggle "bug" first (option 1)
-	component.handleInput("1");
-	// Move down to Other (option index 2: bug=0, feature=1, Other=2)
-	component.handleInput("\x1b[B"); // down
-	component.handleInput("\x1b[B"); // down → Other
-	// Now Other is highlighted. Print characters go directly into the
-	// inline text input — no Enter-to-open step.
+	component.handleInput("1"); // toggle bug
+	component.handleInput("\x1b[B"); // feature
+	component.handleInput("\x1b[B"); // Other
 	for (const ch of "needs-investigation") {
 		component.handleInput(ch);
 	}
-	// Most reliable check: typed text should be in the editor's
-	// buffer. (The editor's full render output is multi-line box
-	// drawing, so we don't assert on the exact format.)
 	assert.equal(
 		typeof component.getEditorText === "function" ? component.getEditorText() : "",
 		"needs-investigation",
-		"typed text should be in the editor's buffer",
+		"typed text should be in the editor buffer before commit",
 	);
-	// Also verify the editor is rendered (the ┌ top border indicates
-	// the pi-tui Editor is active).
-	const draftLines = component.render(80).join("\n");
-	assert.match(
-		draftLines,
-		/┌/,
-		"editor should be rendered when Other is active",
-	);
-	// Enter commits and submits (single-question auto-submits).
+	let lines = component.render(80).join("\n");
+	assert.match(lines, /needs-investigation/);
+	component.handleInput("\r");
+	assert.equal(getDone(), null, "Enter on multi_select Other should not submit the questionnaire");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /→ needs-investigation/);
+	assert.match(lines, /\[Select\]/);
+	component.handleInput("\x1b[B"); // [Select]
 	component.handleInput("\r");
 	const v = getDone();
-	assert.ok(v !== null, "Enter on Other must commit and submit (single question)");
+	assert.ok(v !== null, "[Select] should submit the single-question multi_select");
 	if (v) {
 		assert.equal(v.lifecycle, "answered");
 		assert.equal(v.answers.length, 1);
 		const ans = v.answers[0].value;
 		assert.ok(Array.isArray(ans), "select_many answer must be an array");
 		if (Array.isArray(ans)) {
-			assert.equal(ans.length, 2, "should have bug + Other");
-			assert.equal(ans[0].mode, "option");
-			assert.equal(ans[0].value, "bug");
-			assert.equal(ans[1].mode, "other");
-			assert.equal(ans[1].text, "needs-investigation");
+			assert.deepEqual(ans, [
+				{ mode: "option", value: "bug" },
+				{ mode: "other", text: "needs-investigation" },
+			]);
 		}
 	}
 });
@@ -1345,8 +1471,8 @@ test("multi_select Other: empty Enter on Other is a no-op (no commit)", () => {
 });
 
 test("multi_select Other: revisit shows previous Other text", () => {
-	// Two questions so we can navigate from Submit back to the
-	// multi_select via `[`.
+	// Two questions so we can navigate away and then back to the
+	// multi_select after committing Other text.
 	const questions = [
 		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
 		{ header: "Tags", question: "Which categories?", type: "select_many", options: [{ label: "bug" }] },
@@ -1357,7 +1483,8 @@ test("multi_select Other: revisit shows previous Other text", () => {
 	// Second question: navigate to Other, type, commit
 	component.handleInput("\x1b[B"); // down → Other
 	for (const ch of "first") component.handleInput(ch);
-	component.handleInput("\r"); // commit
+	component.handleInput("\r"); // commit Other, stay on the same question
+	component.handleInput("0"); // jump to Submit
 	// Navigate from Submit tab back to the multi_select.
 	component.handleInput("[");
 	// Render: the inline text input should show "first" (prefilled from
@@ -1403,9 +1530,8 @@ test("multi_select Other: toggling a regular option preserves the existing Other
 	component.handleInput("\x1b[B"); // feature
 	component.handleInput("\x1b[B"); // Other
 	for (const ch of "custom-tag") component.handleInput(ch);
-	component.handleInput("\r"); // commit Other -> Submit tab
-	component.handleInput("["); // back to select_many
-	component.handleInput("\x1b[B"); // feature
+	component.handleInput("\r"); // commit Other, return to choices
+	component.handleInput("\x1b[A"); // feature
 	component.handleInput(" "); // toggle feature on
 	component.handleInput("0"); // submit tab
 	component.handleInput("\r"); // submit all

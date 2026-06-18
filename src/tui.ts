@@ -591,9 +591,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						{ mode: "other", text: trimmed },
 					];
 					saveAnswer(q, arr as AnswerValue);
-				} else {
-					saveAnswer(q, { mode: "other", text: trimmed });
+					inputMode = null;
+					inputQuestionId = null;
+					editor.setText("");
+					refresh();
+					return;
 				}
+				saveAnswer(q, { mode: "other", text: trimmed });
 			} else if (inputMode === "free_text") {
 				saveAnswer(q, value);
 			} else if (inputMode === "danger") {
@@ -607,17 +611,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				saveAnswer(q, value);
 			} else if (inputMode === "text") {
 				saveAnswer(q, value.trim());
-			} else if (inputMode === "notes") {
-				// Save notes
-				if (value.trim() !== "") {
-					notes[inputQuestionId] = value;
-				} else {
-					delete notes[inputQuestionId];
-				}
-				// Stay in notes view until user Tab/Esc back
-				editor.setText(value);
-				refresh();
-				return;
 			}
 			inputMode = null;
 			inputQuestionId = null;
@@ -635,11 +628,27 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			refresh();
 		}
 
-		function closeNotes() {
+		function persistNotesDraft(questionId: string | null = inputQuestionId) {
+			if (!questionId) return;
+			const value = editor.getText();
+			if (value.trim() !== "") {
+				notes[questionId] = value;
+			} else {
+				delete notes[questionId];
+			}
+		}
+
+		function closeNotes(opts: { advanceTab?: boolean } = {}) {
+			persistNotesDraft();
 			inputMode = null;
 			inputQuestionId = null;
 			viewMode = "answer";
 			editor.setText("");
+			if (opts.advanceTab === true && isMulti) {
+				currentTab = Math.min(questions.length, currentTab + 1);
+				optionIndex = 0;
+				reconcileMode();
+			}
 			refresh();
 		}
 
@@ -703,8 +712,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// Note: 'n' is NOT in the nav-key list because it's a
 					// printable character the user might type into the
 					// editor. Tab is the canonical notes toggle, not 'n'.
+					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs
+					// just like [ / ], so they close the Other editor.
 					const isNavKey = matchesKey(data, Key.up) || matchesKey(data, Key.down)
 						|| data === "[" || data === "]" || data === "0"
+						|| data === "\x1b[D" || data === "\x1b[C"
 						|| matchesKey(data, Key.tab);
 					if (!isNavKey) {
 						editor.handleInput(data);
@@ -734,12 +746,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					refresh();
 					return;
 				}
-				// In notes mode, Enter saves & stays; user Tab/Esc to leave
+				if (inputMode === "notes" && matchesKey(data, Key.tab)) {
+					closeNotes({ advanceTab: true });
+					return;
+				}
+				// In notes mode, Enter saves and returns to the answer view.
 				if (inputMode === "notes" && matchesKey(data, Key.enter)) {
-					// Save notes on Enter: trigger the editor's onSubmit, which
-					// our handler routes back to the notes branch.
-					const cur = editor.getText();
-					editor.onSubmit?.(cur);
+					closeNotes();
 					return;
 				}
 				if (!otherHandled) {
@@ -768,10 +781,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// tab-nav handlers below. Without this, the user can't
 				// back out of Submit to fix a wrong answer (they'd have
 				// to Esc and re-answer everything). `]` and `0` are
-				// no-ops here (already on Submit).
+				// no-ops here (already on Submit). Left/Right arrows
+				// work identically to `[` and `]`.
 				const isMetaJump = data.startsWith("\x1b") && data.length >= 2
 					&& data[1] >= "1" && data[1] <= "4";
-				if (!isMulti || (data !== "[" && data !== "]" && data !== "0" && !isMetaJump)) {
+				const isNavKey = data === "[" || data === "]" || data === "0"
+					|| data === "\x1b[D" || data === "\x1b[C" || isMetaJump;
+				if (!isMulti || !isNavKey) {
 					return;
 				}
 				// fall through to global keys (none match `[`) then tab nav
@@ -781,14 +797,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// that `[`, `]`, `0`, Meta+1-4 work from any tab — including
 			// the Submit tab (where there's no active question).
 			if (isMulti) {
-				if (data === "[") {
+				// [ or Left arrow: previous question tab
+				if (data === "[" || data === "\x1b[D") {
 					currentTab = Math.max(0, currentTab - 1);
 					optionIndex = 0;
 					refresh();
 					reconcileMode(); // drive inputMode to match the new tab
 					return;
 				}
-				if (data === "]") {
+				// ] or Right arrow: next question tab
+				if (data === "]" || data === "\x1b[C") {
 					currentTab = Math.min(questions.length, currentTab + 1);
 					optionIndex = 0;
 					refresh();
@@ -910,7 +928,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				} else if (q.type === "free_text") {
 					inputMode = "free_text";
 					inputQuestionId = q.id;
-					editor.setText("");
+					const prev = answers.get(q.id)?.value;
+					editor.setText(typeof prev === "string" ? prev : "");
 					refresh();
 				}
 				return;
@@ -1149,12 +1168,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (viewMode === "notes") {
 				lines.push(theme.fg("muted", `Notes for "${q.header}":`));
 				lines.push("");
-				// We don't render the editor inline (it would conflict with the
-				// rest of the layout). The user is in the editor; the test just
-				// sees this prompt line.
-				lines.push(theme.fg("accent", "(typing in editor — Enter to save, Esc to discard)"));
+				lines.push(...editor.render(contentWidth));
 				lines.push("");
-				lines.push(theme.fg("muted", "[Enter] save notes  [Esc] back to answer"));
+				lines.push(theme.fg("muted", "[Enter] save + back  [Tab] save + next tab  [Esc] save + back"));
 				return wrapInFrame(lines, width);
 			}
 
@@ -1238,17 +1254,27 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				lines.push("");
 				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
 			} else if (q.type === "free_text") {
-				lines.push(theme.fg("muted", "(Enter to start typing — multiline)"));
-				if (q.placeholder) {
-					lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
-				}
-				const current = answers.get(q.id)?.value;
+				const isEditing = inputMode === "free_text" && inputQuestionId === q.id;
+				if (isEditing) {
+					lines.push(theme.fg("muted", "(typing — Enter saves this answer)"));
+					if (q.placeholder) {
+						lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
+					}
+					lines.push("");
+					lines.push(...editor.render(contentWidth));
+				} else {
+					lines.push(theme.fg("muted", "(Enter to start typing — multiline)"));
+					if (q.placeholder) {
+						lines.push(theme.fg("muted", `Placeholder: ${q.placeholder}`));
+					}
+					const current = answers.get(q.id)?.value;
 					if (typeof current === "string" && current.length > 0) {
 						lines.push("");
 						addWrapped(lines, theme.fg("success", `Answered: ${current}`), contentWidth);
 					}
+				}
 				lines.push("");
-				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
+				lines.push(theme.fg("muted", isEditing ? "[Enter] save answer  Esc close" : "Enter to type  Tab notes  ? help  Esc cancel"));
 			}
 
 			// Status line: duration timer + notes indicator + browser URL
