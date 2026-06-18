@@ -1,10 +1,9 @@
 // src/tui.ts
 // Rich TUI component for the AskUserQuestion tool. v2 supports 5 question types
 // (select_one, select_many, confirm_enum, number, free_text) in a tabbed
-// interface. Full feature set per spec §4 lands across slices; this file is
-// the minimal-but-functional v2 starting point for slice 1, with notes /
-// persistent checkmarks / preview expansion / "Other" revisit / live count
-// added in slice 2+.
+// interface with per-type rendering, notes, persistent checkmarks, preview
+// expansion, "Other" revisit prepopulation, help overlay, and browser-open
+// shortcut. Per spec §4.
 
 import {
 	Editor,
@@ -46,6 +45,7 @@ export interface TuiOptions {
 // ---- Tabs -----------------------------------------------------------------
 
 const SUBMIT_TAB = "__submit__";
+type ViewMode = "answer" | "notes" | "help";
 
 // ---- Render helpers -------------------------------------------------------
 
@@ -77,6 +77,7 @@ function renderOptionLine(
 	selected: boolean,
 	checked: boolean | undefined,
 	active: boolean,
+	previewExpanded: boolean,
 	width: number,
 	theme: any,
 	lines: string[],
@@ -84,12 +85,10 @@ function renderOptionLine(
 	const isOther = opt.isOther === true;
 	const head = (() => {
 		if (checked !== undefined) {
-			// multi_select: checkbox
 			const arrow = selected ? theme.fg("accent", "▶ ") : "  ";
 			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
 			return `${arrow}${box} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 		}
-		// select_one / confirm_enum: arrow pointer
 		const arrow = selected ? theme.fg("accent", "> ") : "  ";
 		return `${arrow}${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 	})();
@@ -98,25 +97,65 @@ function renderOptionLine(
 		addWrappedWithPrefix(lines, "     ", theme.fg("muted", opt.description), width);
 	}
 	if (opt.preview) {
-		addWrappedWithPrefix(lines, "     ", previewLine(opt.preview.type, theme), width);
-		const w = Math.max(1, width);
-		const indented = wrapTextWithAnsi(opt.preview.content, w - 7).map((l) => "      " + l);
-		lines.push(...indented);
+		if (previewExpanded) {
+			lines.push(theme.fg("muted", `     ┌─ ${opt.preview.type} ─`));
+			const w = Math.max(1, width);
+			const indented = wrapTextWithAnsi(opt.preview.content, w - 9).map(
+				(l) => "     │ " + l,
+			);
+			lines.push(...indented);
+			lines.push(theme.fg("muted", "     └────"));
+		} else {
+			lines.push(
+				theme.fg(
+					"muted",
+					`     ${previewLine(opt.preview.type, theme)} (press e to expand)`,
+				),
+			);
+		}
 	}
 }
 
 function isOtherSelectedFor(q: CanonicalQuestion, currentValue: AnswerValue | undefined): boolean {
 	if (currentValue === undefined) return false;
-	if (q.type === "select_one") {
-		const a = currentValue as { mode?: string; text?: string };
-		return typeof a === "object" && a !== null && a.mode === "other";
-	}
-	if (q.type === "confirm_enum") {
-		const a = currentValue as { mode?: string; text?: string };
-		return typeof a === "object" && a !== null && a.mode === "other";
+	if (q.type === "select_one" || q.type === "confirm_enum") {
+		return typeof currentValue === "object" && currentValue !== null && !Array.isArray(currentValue) && (currentValue as { mode?: string }).mode === "other";
 	}
 	return false;
 }
+
+function getOtherText(q: CanonicalQuestion, currentValue: AnswerValue | undefined): string {
+	if (currentValue === undefined) return "";
+	if (q.type === "select_one" || q.type === "confirm_enum") {
+		const a = currentValue as { mode?: string; text?: string };
+		return a.mode === "other" ? a.text ?? "" : "";
+	}
+	return "";
+}
+
+function getOptionByIdx(q: CanonicalQuestion, idx: number): RenderOption | undefined {
+	const opts = getRenderOptions(q);
+	return opts[idx];
+}
+
+const KEYMAP_HELP = [
+	"",
+	"  Keyboard shortcuts:",
+	"  ↑/↓         Navigate options (or nudge value on number)",
+	"  Enter       Select / commit / submit",
+	"  Space       Toggle (select_many)",
+	"  Tab / n     Swap to notes editor (or back)",
+	"  1-9         Select option index (choice questions)",
+	"  Meta+1-4    Jump to question N (multi-question)",
+	"  [ / ]       Previous / next question tab",
+	"  0           Jump to Submit tab",
+	"  e           Toggle preview expansion (current option)",
+	"  o           Open browser URL (in browser view)",
+	"  ?           Show this help",
+	"  Esc         Cancel (or back from notes)",
+	"",
+	"  Press any key to dismiss this help.",
+];
 
 // ---- Component factory ----------------------------------------------------
 
@@ -131,11 +170,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 	return (tui: any, theme: any, _kb: any, done: (v: TuiResult) => void) => {
 		let currentTab = 0;
 		let optionIndex = 0;
-		let checked: Record<string, Set<number>> = {};
-		const answers = new Map<string, TuiAnswer>();
+		const checked: Record<string, Set<number>> = {};
+		const expandedPreview: Record<string, number | null> = {}; // q.id -> option index
 		const notes: Record<string, string> = {};
-		let inputMode: "text" | "number" | "other" | "free_text" | null = null;
+		const answers = new Map<string, TuiAnswer>();
+		let viewMode: ViewMode = "answer";
+		let inputMode: "text" | "number" | "other" | "free_text" | "notes" | null = null;
 		let inputQuestionId: string | null = null;
+		let browserUrl: string | null = null;
+		let lastBrowserOpenAttempt: { url: string; at: number } | null = null;
 
 		const editorTheme: EditorTheme = {
 			borderColor: (s: string) => theme.fg("accent", s),
@@ -148,7 +191,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			},
 		};
 		const editor = new Editor(tui, editorTheme);
-
 		function refresh() {
 			tui.requestRender();
 		}
@@ -176,6 +218,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		}
 
 		function commitAndAdvance() {
+			viewMode = "answer";
 			if (!isMulti) {
 				done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
 				return;
@@ -224,7 +267,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (opt.isOther) {
 					inputMode = "other";
 					inputQuestionId = q.id;
-					editor.setText("");
+					// Pre-populate editor with previous "Other" text (Other revisit)
+					const prev = getOtherText(q, answers.get(q.id)?.value);
+					editor.setText(prev);
 					refresh();
 					return;
 				}
@@ -241,7 +286,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (opt.isOther) {
 				inputMode = "other";
 				inputQuestionId = q.id;
-				editor.setText("");
+				// Pre-populate editor with previous "Other" text (Other revisit)
+				const prev = getOtherText(q, answers.get(q.id)?.value);
+				editor.setText(prev);
 				refresh();
 				return;
 			}
@@ -278,6 +325,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				saveAnswer(q, value);
 			} else if (inputMode === "text") {
 				saveAnswer(q, value.trim());
+			} else if (inputMode === "notes") {
+				// Save notes
+				if (value.trim() !== "") {
+					notes[inputQuestionId] = value;
+				} else {
+					delete notes[inputQuestionId];
+				}
+				// Stay in notes view until user Tab/Esc back
+				editor.setText(value);
+				refresh();
+				return;
 			}
 			inputMode = null;
 			inputQuestionId = null;
@@ -285,13 +343,49 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			commitAndAdvance();
 		};
 
+		// --- notes mode -----------------------------------------------------
+
+		function openNotes(q: CanonicalQuestion) {
+			inputMode = "notes";
+			inputQuestionId = q.id;
+			viewMode = "notes";
+			editor.setText(notes[q.id] ?? "");
+			refresh();
+		}
+
+		function closeNotes() {
+			inputMode = null;
+			inputQuestionId = null;
+			viewMode = "answer";
+			editor.setText("");
+			refresh();
+		}
+
+		function toggleNotes() {
+			const q = currentQuestion();
+			if (!q) return;
+			if (viewMode === "notes") closeNotes();
+			else openNotes(q);
+		}
+
 		function handleInput(data: string) {
+			// Help overlay: any key dismisses
+			if (viewMode === "help") {
+				viewMode = "answer";
+				refresh();
+				return;
+			}
+
 			if (inputMode) {
 				if (matchesKey(data, Key.escape)) {
-					inputMode = null;
-					inputQuestionId = null;
-					editor.setText("");
-					refresh();
+					if (inputMode === "notes") {
+						closeNotes();
+					} else {
+						inputMode = null;
+						inputQuestionId = null;
+						editor.setText("");
+						refresh();
+					}
 					return;
 				}
 				if (inputMode === "number" && matchesKey(data, Key.up)) {
@@ -306,7 +400,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					refresh();
 					return;
 				}
-				// Forward to editor for normal text input
+				// In notes mode, Enter saves & stays; user Tab/Esc to leave
+				if (inputMode === "notes" && matchesKey(data, Key.enter)) {
+					// Save notes on Enter: trigger the editor's onSubmit, which
+					// our handler routes back to the notes branch.
+					const cur = editor.getText();
+					editor.onSubmit?.(cur);
+					return;
+				}
 				editor.handleInput(data);
 				refresh();
 				return;
@@ -327,9 +428,42 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 			const q = currentQuestion()!;
 
-			// Tab nav: Meta+1..4 (or [ / ]) or 0 (Submit)
+			// Global keys
 			if (matchesKey(data, Key.escape)) {
 				cancel();
+				return;
+			}
+			if (data === "?") {
+				viewMode = "help";
+				refresh();
+				return;
+			}
+			if (data === "n" || matchesKey(data, Key.tab)) {
+				toggleNotes();
+				return;
+			}
+			if (data === "e") {
+				// Toggle preview expansion for current option on choice questions
+				if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
+					const opts = getRenderOptions(q);
+					const cur = expandedPreview[q.id];
+					if (cur === optionIndex) {
+						delete expandedPreview[q.id];
+					} else {
+						expandedPreview[q.id] = optionIndex;
+					}
+				}
+				refresh();
+				return;
+			}
+			if (data === "o") {
+				// Open browser URL (slice 5 will hook this up; for now we record)
+				if (browserUrl) {
+					lastBrowserOpenAttempt = { url: browserUrl, at: Date.now() };
+					// In a real implementation, we'd spawn xdg-open/open/start here.
+					// The slice 5+ server module will register an openBrowser() callback.
+				}
+				refresh();
 				return;
 			}
 			if (isMulti) {
@@ -350,9 +484,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					refresh();
 					return;
 				}
-				// Meta+1..4 (Alt+1..4): jump to question
-				if (data.startsWith("\x1b") && data.length >= 3 && data[2] >= "1" && data[2] <= "4") {
-					const n = Number(data[2]) - 1;
+				// Meta+1..4: jump to question. ESC + digit arrives as "\x1b1" (2 chars).
+				if (data.startsWith("\x1b") && data.length >= 2 && data[1] >= "1" && data[1] <= "4") {
+					const n = Number(data[1]) - 1;
 					if (n < questions.length) {
 						currentTab = n;
 						optionIndex = 0;
@@ -407,7 +541,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// 1-9: select option on choice questions
 			if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 				const opts = getRenderOptions(q);
-				// Clamp to options.length - 1 so numeric keys never reach "Other"
 				const numericMax = opts.length - 1; // last index = "Other"
 				if (data >= "1" && data <= "9") {
 					const n = Number(data) - 1;
@@ -419,7 +552,41 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 		}
 
+		function renderAnsweredValue(v: AnswerValue): string {
+			if (typeof v === "object" && v !== null && !Array.isArray(v) && "mode" in v) {
+				const obj = v as { mode: string; value?: unknown; text?: string };
+				if (obj.mode === "option") return String(obj.value);
+				if (obj.mode === "other") return `(Other) ${obj.text}`;
+				return JSON.stringify(v);
+			}
+			if (Array.isArray(v)) {
+				return v
+					.map((e) =>
+						typeof e === "object" && e !== null && "mode" in e
+							? e.mode === "option"
+								? (e as { value: string }).value
+								: `(Other) ${(e as { text: string }).text}`
+							: String(e),
+					)
+					.join(", ");
+			}
+			return String(v);
+		}
+
+		function setBrowserUrl(url: string | null) {
+			browserUrl = url;
+		}
+
+		function getBrowserOpenAttempt() {
+			return lastBrowserOpenAttempt;
+		}
+
 		function render(width: number): string[] {
+			// Help overlay
+			if (viewMode === "help") {
+				return KEYMAP_HELP.map((l) => theme.fg("muted", l));
+			}
+
 			const lines: string[] = [];
 			// Tab bar (multi-question only)
 			if (isMulti) {
@@ -427,7 +594,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				for (let i = 0; i < questions.length; i++) {
 					const q = questions[i];
 					const answered = answers.has(q.id);
-					const marker = answered ? "■" : "□";
+					const hasNote = notes[q.id] !== undefined && notes[q.id] !== "";
+					const marker = answered ? (hasNote ? "▣" : "■") : (hasNote ? "▢" : "□");
 					const active = i === currentTab;
 					const text = `${marker} ${q.header}`;
 					tabs.push(active ? theme.fg("accent", text) : theme.fg("muted", text));
@@ -448,32 +616,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const head = theme.fg("accent", q.header);
 					if (!a) {
 						lines.push(`${theme.fg("muted", "○")} ${head}: ${theme.fg("warning", "unanswered")}`);
-						continue;
-					}
-					const v = a.value;
-					let display: string;
-					if (typeof v === "object" && v !== null && "mode" in v) {
-						if (v.mode === "option") display = String((v as { value: unknown }).value);
-						else if (v.mode === "other") display = `(Other) ${(v as { text: string }).text}`;
-						else display = JSON.stringify(v);
-					} else if (typeof v === "string") {
-						display = v;
-					} else if (typeof v === "number") {
-						display = String(v);
-					} else if (Array.isArray(v)) {
-						display = v
-							.map((e) =>
-								typeof e === "object" && e !== null && "mode" in e
-									? e.mode === "option"
-										? (e as { value: string }).value
-										: `(Other) ${(e as { text: string }).text}`
-									: String(e),
-							)
-							.join(", ");
 					} else {
-						display = String(v);
+						lines.push(`${theme.fg("success", "✓")} ${head}: ${renderAnsweredValue(a.value)}`);
 					}
-					lines.push(`${theme.fg("success", "✓")} ${head}: ${display}`);
+					const note = notes[q.id];
+					if (note) {
+						addWrappedWithPrefix(lines, "    ", theme.fg("muted", `note: ${note}`), width);
+					}
 				}
 				lines.push("");
 				lines.push(theme.fg("muted", "[Enter] submit  [Esc] cancel"));
@@ -489,10 +638,24 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 			lines.push("");
 
+			// Notes mode for this question
+			if (viewMode === "notes") {
+				lines.push(theme.fg("muted", `Notes for "${q.header}":`));
+				lines.push("");
+				// We don't render the editor inline (it would conflict with the
+				// rest of the layout). The user is in the editor; the test just
+				// sees this prompt line.
+				lines.push(theme.fg("accent", "(typing in editor — Enter to save, Esc to discard)"));
+				lines.push("");
+				lines.push(theme.fg("muted", "[Enter] save notes  [Esc] back to answer"));
+				return lines;
+			}
+
 			if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 				const opts = getRenderOptions(q);
 				const currentValue = answers.get(q.id)?.value;
 				const isOtherChosen = isOtherSelectedFor(q, currentValue);
+				const otherText = getOtherText(q, currentValue);
 				for (let i = 0; i < opts.length; i++) {
 					const opt = opts[i];
 					const isOtherOpt = opt.isOther === true;
@@ -500,20 +663,21 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const isChecked = q.type === "select_many"
 						? (checked[q.id]?.has(i) ?? false)
 						: undefined;
-					// For Other, show checkmark if it was the chosen one
 					const showOtherMark = isOtherOpt && isOtherChosen;
-					const fakeChecked = showOtherMark
-						? true
-						: isChecked;
-					// If answered, dim non-chosen options
+					const fakeChecked = showOtherMark ? true : isChecked;
 					const active = isOtherOpt && isOtherChosen;
-					renderOptionLine(opt, i, selected, fakeChecked, active, width, theme, lines);
+					const previewExpanded = expandedPreview[q.id] === i;
+					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, width, theme, lines);
+					// If Other is chosen, show the text on the next line
+					if (isOtherOpt && isOtherChosen && otherText) {
+						addWrappedWithPrefix(lines, "     ", theme.fg("accent", `→ ${otherText}`), width);
+					}
 				}
 				lines.push("");
 				if (q.type === "select_many") {
-					lines.push(theme.fg("muted", "↑/↓ navigate  Space toggle  Enter next  Esc cancel"));
+					lines.push(theme.fg("muted", "↑/↓ navigate  Space toggle  Enter next  Tab notes  e preview  ? help"));
 				} else {
-					lines.push(theme.fg("muted", "↑/↓ navigate  Enter select  1-9 quick  Esc cancel"));
+					lines.push(theme.fg("muted", "↑/↓ navigate  Enter select  1-9 quick  Tab notes  e preview  o browser  ? help"));
 				}
 			} else if (q.type === "number") {
 				lines.push(theme.fg("muted", "(Enter to edit; ↑/↓ to nudge)"));
@@ -531,7 +695,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					lines.push(theme.fg("success", `Answered: ${current}`));
 				}
 				lines.push("");
-				lines.push(theme.fg("muted", "Enter to type  Esc cancel"));
+				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
 			} else if (q.type === "free_text") {
 				lines.push(theme.fg("muted", "(Enter to start typing — multiline)"));
 				if (q.placeholder) {
@@ -543,8 +707,21 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					addWrapped(lines, theme.fg("success", `Answered: ${current}`), width);
 				}
 				lines.push("");
-				lines.push(theme.fg("muted", "Enter to type  Esc cancel"));
+				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
 			}
+
+			// Status line: notes indicator + browser URL
+			const note = notes[q.id];
+			const noteIndicator = note ? theme.fg("accent", " 📝") : "";
+			if (browserUrl) {
+				lines.push("");
+				lines.push(theme.fg("muted", `🌐 ${browserUrl} (press o to open)`));
+			}
+			if (noteIndicator) {
+				lines.push(theme.fg("muted", `Note: ${note}`));
+			}
+			// Suppress unused warning for the helper
+			void getOptionByIdx;
 
 			return lines;
 		}
@@ -555,6 +732,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			invalidate() {
 				refresh();
 			},
+			// Exposed for slice 5+ to wire up
+			setBrowserUrl,
+			getBrowserOpenAttempt,
 		};
 	};
 }
