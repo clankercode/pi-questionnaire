@@ -8,6 +8,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { AskUserQuestionParams, validateSemantics } from "./schema.ts";
 import { normalizeQuestions } from "./normalize.ts";
 import { buildQuestionnaireComponent, type TuiResult } from "./tui.ts";
+import { fireOnQuestionSideEffects } from "./side-effects.ts";
+import { getSettings } from "./settings.ts";
 import type { AnswerMap, CanonicalQuestion, ToolResultDetails } from "./types.ts";
 
 function formatAnswers(
@@ -155,11 +157,23 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// 4. Interactive TUI
+			// 4. Fire per-setting side effects (notification, TTS, command,
+			// heartbeat, browser-intent log, danger-check log). The handle
+			// owns the heartbeat interval and any pending delayed
+			// notification timer; we MUST call clear() on every return
+			// path below to release them. Settings are read live (no
+			// cache) so live edits to ~/.config or .pi/ pick up here.
+			const sideEffects = fireOnQuestionSideEffects(params, pi);
+
+			// 5. Interactive TUI
 			const factory = buildQuestionnaireComponent({ questions });
 			const result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) =>
 				factory(tui, theme, kb, done),
 			);
+
+			// TUI settled — release the heartbeat + delayed-notification
+			// timer before any return. Safe to call twice.
+			sideEffects.clear();
 
 			if (!result || result.lifecycle === "cancelled") {
 				return {
@@ -178,6 +192,12 @@ export default function (pi: ExtensionAPI) {
 				const a = result.answers.find((x) => x.id === questions[i].id);
 				if (a) answers[String(i)] = a.value;
 			}
+			// debounceMs lives on the answered details so the TUI (or any
+			// downstream consumer) can read the active value at submit
+			// time. We re-read getSettings() live here for the same
+			// reason: if the user changed it mid-questionnaire, the value
+			// on the result reflects the moment-of-answer, not the
+			// moment-of-mount.
 			return {
 				content: [
 					{
@@ -190,7 +210,8 @@ export default function (pi: ExtensionAPI) {
 					answers,
 					...(result.notes ? { notes: result.notes } : {}),
 					lifecycle: "answered",
-				},
+					debounceMs: getSettings().debounceMs,
+				} as ToolResultDetails & { debounceMs: number },
 			};
 		},
 
