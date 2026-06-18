@@ -1153,8 +1153,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			scheduleBrowserRefresh();
 		}
 
-		function applyBrowserSubmit() {
-			submit();
+		function applyBrowserSubmit(): boolean {
+			if (allAnswered()) {
+				submit();
+				return true;
+			}
+			currentTab = questions.length;
+			opts.onBrowserStateChange?.({ currentTab });
+			scheduleBrowserRefresh();
+			return false;
 		}
 
 		function applyBrowserCancel() {

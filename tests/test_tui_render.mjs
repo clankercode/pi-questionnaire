@@ -806,6 +806,38 @@ test("browser-origin tab and answer updates debounce TUI refresh", async () => {
 
 	await new Promise((resolve) => setTimeout(resolve, 20));
 	assert.equal(renderCount, 1, "one idle refresh should fire after the debounce window");
+	component.applyBrowserAnswer("a", { mode: "option", value: "Red" });
+	component.applyBrowserSubmit();
+	assert.equal(doneValue.lifecycle, "answered");
+});
+
+test("browser-origin submit is blocked until every question is answered", async () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },
+		{ id: "b", header: "b", question: "B?", type: "free_text" },
+	]);
+	let doneValue = null;
+	let renderCount = 0;
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(
+		{ ...makeFakeTui(), requestRender: () => { renderCount += 1; } },
+		fakeTheme,
+		{},
+		(v) => { doneValue = v; },
+	);
+
+	component.applyBrowserAnswer("b", "partial");
+	component.applyBrowserSubmit();
+	assert.equal(doneValue, null, "partial browser answers must not submit");
+	assert.equal(component.getBrowserState().currentTab, 2, "blocked submit moves to Submit review tab");
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.ok(renderCount >= 1, "blocked submit should refresh after idle debounce");
+
+	component.applyBrowserAnswer("a", { mode: "option", value: "Red" });
 	component.applyBrowserSubmit();
 	assert.equal(doneValue.lifecycle, "answered");
 });
