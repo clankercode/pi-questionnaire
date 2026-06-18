@@ -78,6 +78,33 @@ function drive(questions) {
 	return { component, getDone: () => doneValue };
 }
 
+function countChars(text, ch) {
+	return Array.from(text).filter((c) => c === ch).length;
+}
+
+function stripAnsi(text) {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function visibleWidthForTest(text) {
+	let width = 0;
+	for (const ch of Array.from(stripAnsi(text))) {
+		const cp = ch.codePointAt(0) ?? 0;
+		width += cp >= 0x1F300 && cp <= 0x1FAFF ? 2 : 1;
+	}
+	return width;
+}
+
+function assertFrameIntact(lines, width) {
+	assert.ok(lines.length >= 2, "frame should include top and bottom borders");
+	assert.match(stripAnsi(lines[0]), /^┌.*┐$/, "top border should be intact");
+	assert.match(stripAnsi(lines.at(-1) ?? ""), /^└.*┘$/, "bottom border should be intact");
+	for (const line of lines) {
+		const plain = stripAnsi(line);
+		assert.equal(visibleWidthForTest(plain), width, `expected visible width ${width}, got ${visibleWidthForTest(plain)}: ${plain}`);
+	}
+}
+
 // ---- Render tests ---------------------------------------------------------
 
 test("select_one renders question + numbered options", () => {
@@ -151,6 +178,51 @@ test("free_text opens editor immediately on render", () => {
 	// it) and a cursor block is rendered to show where input will go.
 	assert.match(joined, /Optional/);
 	assert.match(joined, /\u258f/); // cursor block
+});
+
+test("free_text long draft wraps without truncating or breaking frame", () => {
+	const draft = "x".repeat(500);
+	const { component } = drive([{
+		header: "Long",
+		question: "Long answer?",
+		type: "free_text",
+	}]);
+	for (const ch of draft) component.handleInput(ch);
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	assert.match(joined, /x{20}/, "render should include a wrapped run from the long draft");
+	assert.equal(countChars(joined, "x"), 500, "all draft characters should render exactly once");
+	assertFrameIntact(lines, 80);
+});
+
+test("free_text renders unicode and emoji draft", () => {
+	const draft = "héllo 🌍 wörld";
+	const { component } = drive([{
+		header: "Unicode",
+		question: "Unicode answer?",
+		type: "free_text",
+	}]);
+	for (const ch of draft) component.handleInput(ch);
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	assert.match(joined, /héllo 🌍 wörld/);
+	assert.equal(component.getEditorText(), draft);
+	assertFrameIntact(lines, 80);
+});
+
+test("rapid free_text key sequence captures every character", () => {
+	const keys = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX";
+	assert.equal(keys.length, 50);
+	const { component } = drive([{
+		header: "Rapid",
+		question: "Rapid input?",
+		type: "free_text",
+	}]);
+	for (const ch of keys) component.handleInput(ch);
+	const lines = component.render(100).join("\n");
+	assert.match(lines, /abcdefghijklmnopqrstuvwxyz/);
+	assert.match(lines, /ABCDEFGHIJKLMNOPQRSTUVWX/);
+	assert.equal(component.getEditorText(), keys, "all rapid key inputs should be captured in order");
 });
 
 test("multi question renders tab bar", () => {
@@ -514,6 +586,40 @@ test("notes typing is visible while editing", () => {
 	assert.match(lines, /remember this/);
 });
 
+test("notes long draft wraps without truncating or breaking frame", () => {
+	const draft = "z".repeat(500);
+	const { component } = drive([{
+		header: "LongNote",
+		question: "Record note?",
+		type: "select_one",
+		options: [{ label: "A" }],
+	}]);
+	component.handleInput("\t");
+	for (const ch of draft) component.handleInput(ch);
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	assert.match(joined, /z{20}/, "render should include a wrapped run from the long note");
+	assert.equal(countChars(joined, "z"), 500, "all note characters should render exactly once");
+	assertFrameIntact(lines, 80);
+});
+
+test("notes render unicode and emoji draft", () => {
+	const draft = "héllo 🌍 wörld";
+	const { component } = drive([{
+		header: "UnicodeNote",
+		question: "Record unicode note?",
+		type: "select_one",
+		options: [{ label: "A" }],
+	}]);
+	component.handleInput("\t");
+	for (const ch of draft) component.handleInput(ch);
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	assert.match(joined, /héllo 🌍 wörld/);
+	assert.equal(component.getEditorText(), draft);
+	assertFrameIntact(lines, 80);
+});
+
 test("notes Enter saves and returns to answer view", () => {
 	const questions = [
 		{ header: "a", question: "A?", type: "select_one", options: [{ label: "Yes" }] },
@@ -706,6 +812,98 @@ test("Left/Right arrows switch question tabs", () => {
 	component.handleInput("\u001b[D");
 	lines = component.render(80).join("\n");
 	assert.match(lines, /B\?/);
+});
+
+test("multi-question stress: nav and submit across mixed question types", () => {
+	const questions = [
+		{ id: "pick1", header: "Pick1", question: "Pick one 1?", type: "select_one", options: [{ label: "A1" }, { label: "B1" }] },
+		{ id: "many1", header: "Many1", question: "Pick many 1?", type: "select_many", options: [{ label: "M1A" }, { label: "M1B" }] },
+		{ id: "confirm1", header: "Confirm1", question: "Confirm 1?", type: "confirm_enum" },
+		{ id: "text1", header: "Text1", question: "Text 1?", type: "free_text" },
+		{ id: "number1", header: "Number1", question: "Number 1?", type: "number", min: 0, max: 100 },
+		{ id: "pick2", header: "Pick2", question: "Pick one 2?", type: "select_one", options: [{ label: "A2" }, { label: "B2" }] },
+		{ id: "text2", header: "Text2", question: "Text 2?", type: "free_text" },
+		{ id: "many2", header: "Many2", question: "Pick many 2?", type: "select_many", options: [{ label: "M2A" }, { label: "M2B" }] },
+		{ id: "number2", header: "Number2", question: "Number 2?", type: "number", min: 0, max: 10 },
+		{ id: "confirm2", header: "Confirm2", question: "Confirm 2?", type: "confirm_enum" },
+		{ id: "text3", header: "Text3", question: "Text 3?", type: "free_text" },
+	];
+	const { component, getDone } = drive(questions);
+
+	let lines = component.render(120).join("\n");
+	assert.match(lines, /Pick one 1\?/);
+	component.handleInput("]");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick many 1\?/);
+	component.handleInput("[");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick one 1\?/);
+	component.handleInput("\x1b[C");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick many 1\?/);
+	component.handleInput("\x1b[D");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick one 1\?/);
+	component.handleInput("\x1b4");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Text 1\?/);
+	component.handleInput("\x1b3");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Confirm 1\?/);
+	component.handleInput("\x1b2");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick many 1\?/);
+	component.handleInput("\x1b1");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Pick one 1\?/);
+	component.handleInput("0");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Submit answers/);
+	component.handleInput("[");
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Text 3\?/);
+
+	component.handleInput("\x1b1"); // Pick1
+	component.handleInput("1");
+	component.handleInput("1"); // Many1: toggle M1A
+	component.handleInput("]");
+	component.handleInput("1"); // Confirm1: affirm
+	for (const ch of "alpha") component.handleInput(ch);
+	component.handleInput("]"); // Text1: nav-key commit while editor is active
+	for (const ch of "42") component.handleInput(ch);
+	component.handleInput("\x1b[C"); // Number1: arrow-key commit while editor is active
+	component.handleInput("2"); // Pick2: B2
+	for (const ch of "bravo") component.handleInput(ch);
+	component.handleInput("\x1b[C"); // Text2: arrow-key commit while editor is active
+	component.handleInput("2"); // Many2: toggle M2B
+	component.handleInput("]");
+	for (const ch of "7") component.handleInput(ch);
+	component.handleInput("]"); // Number2: bracket-nav commit while editor is active
+	component.handleInput("\x1b[B");
+	component.handleInput("\r"); // Confirm2: decline
+	for (const ch of "charlie") component.handleInput(ch);
+	component.handleInput("0"); // Text3: Submit-tab jump commits while editor is active
+	lines = component.render(120).join("\n");
+	assert.match(lines, /Submit answers/);
+	component.handleInput("\r");
+
+	const done = getDone();
+	assert.ok(done !== null, "Submit should call done() after every mixed question is answered");
+	if (done) {
+		assert.equal(done.lifecycle, "answered");
+		assert.equal(done.answers.length, questions.length);
+		assert.deepEqual(done.answers.find((a) => a.id === "pick1")?.value, { mode: "option", value: "A1" });
+		assert.deepEqual(done.answers.find((a) => a.id === "many1")?.value, [{ mode: "option", value: "M1A" }]);
+		assert.deepEqual(done.answers.find((a) => a.id === "confirm1")?.value, { mode: "option", value: "affirm" });
+		assert.equal(done.answers.find((a) => a.id === "text1")?.value, "alpha");
+		assert.equal(done.answers.find((a) => a.id === "number1")?.value, 42);
+		assert.deepEqual(done.answers.find((a) => a.id === "pick2")?.value, { mode: "option", value: "B2" });
+		assert.equal(done.answers.find((a) => a.id === "text2")?.value, "bravo");
+		assert.deepEqual(done.answers.find((a) => a.id === "many2")?.value, [{ mode: "option", value: "M2B" }]);
+		assert.equal(done.answers.find((a) => a.id === "number2")?.value, 7);
+		assert.deepEqual(done.answers.find((a) => a.id === "confirm2")?.value, { mode: "option", value: "decline" });
+		assert.equal(done.answers.find((a) => a.id === "text3")?.value, "charlie");
+	}
 });
 
 test("preview expansion persists per question; toggles with `e`", () => {
