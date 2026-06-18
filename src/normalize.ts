@@ -170,6 +170,7 @@ export function normalizeQuestion(raw: RawQuestion, index: number): CanonicalQue
 	if (raw.max !== undefined) q.max = raw.max;
 	if (raw.placeholder !== undefined) q.placeholder = raw.placeholder;
 	if (raw.multiline !== undefined) q.multiline = raw.multiline;
+	if (raw.is_dangerous !== undefined) q.is_dangerous = raw.is_dangerous;
 	// free_text default: multiline = true unless explicitly false
 	if (qtype === "free_text" && q.multiline === undefined) {
 		q.multiline = true;

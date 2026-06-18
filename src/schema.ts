@@ -5,6 +5,7 @@
 
 import { Type } from "typebox";
 import type { Static } from "typebox";
+import { Value } from "typebox/value";
 import { MAX_HEADER_LENGTH, MAX_OPTIONS_PER_USER, MAX_QUESTIONS_PER_CALL } from "./types.ts";
 
 const PreviewSchema = Type.Object({
@@ -43,6 +44,7 @@ const QuestionSchema = Type.Object({
 	max: Type.Optional(Type.Number()),
 	placeholder: Type.Optional(Type.String({ maxLength: 200 })),
 	multiline: Type.Optional(Type.Boolean()),
+	is_dangerous: Type.Optional(Type.Boolean()),
 });
 
 export const AskUserQuestionParams = Type.Object({
@@ -188,3 +190,19 @@ export function validateSemantics(input: AskUserQuestionInput): Validation<AskUs
 
 /** Names of fields that v2 removed. Exported for documentation and tests. */
 export const REMOVED_FIELDS = [...ALIASES_REMOVED] as const;
+
+/** Validate input strictly against the AskUserQuestionParams typebox schema.
+ * Returns a clear reason string on the first violation. Used by the harness
+ * (and could be wired into the tool entrypoint) to surface type mismatches
+ * like `is_dangerous: "yes"`. */
+export function validateSchema(input: unknown): Validation<AskUserQuestionInput> {
+	if (input === null || typeof input !== "object") {
+		return { ok: false, reason: "AskUserQuestion input must be an object" };
+	}
+	const check = Value.Check(AskUserQuestionParams, input);
+	if (check) return { ok: true, value: input as AskUserQuestionInput };
+	const errs = Value.Errors(AskUserQuestionParams, input);
+	const first = errs[0];
+	const path = first?.instancePath && first.instancePath.length > 0 ? first.instancePath : "<root>";
+	return { ok: false, reason: `${path}: ${first?.message ?? "schema violation"}` };
+}

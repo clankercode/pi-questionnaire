@@ -278,3 +278,34 @@ def test_rejects_unknown_preview_type():
     assert r["ok"] is True
     a = r["value"][0]["options"][0]
     assert a.get("preview") is None
+
+
+# --- is_dangerous pass-through ------------------------------------------
+
+def test_normalize_preserves_is_dangerous_true():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "x", "question": "q?", "type": "free_text",
+        "is_dangerous": True,
+    }]})
+    assert r["ok"] is True, r
+    assert r["value"][0]["is_dangerous"] is True
+
+
+def test_normalize_preserves_is_dangerous_false():
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "x", "question": "q?", "type": "free_text",
+        "is_dangerous": False,
+    }]})
+    assert r["ok"] is True, r
+    assert r["value"][0]["is_dangerous"] is False
+
+
+def test_normalize_omits_is_dangerous_when_unset():
+    """When the input has no is_dangerous, the canonical question must not
+    set a default — the key is absent so the TUI knows the user did not
+    explicitly flag the question as dangerous."""
+    r = run_harness({"cmd": "normalize", "input": [{
+        "header": "x", "question": "q?", "type": "free_text",
+    }]})
+    assert r["ok"] is True, r
+    assert "is_dangerous" not in r["value"][0]

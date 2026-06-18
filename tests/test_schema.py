@@ -311,6 +311,34 @@ def test_accepts_short_header():
     assert r["ok"] is True, r
 
 
+# --- is_dangerous field --------------------------------------------------
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_valid_is_dangerous(flag):
+    """Schema accepts is_dangerous as an optional boolean."""
+    r = run_harness({
+        "cmd": "validateSchema",
+        "input": {"questions": [{
+            "header": "x", "question": "q?", "type": "free_text",
+            "is_dangerous": flag,
+        }]},
+    })
+    assert r["ok"] is True, r
+
+
+def test_rejects_non_boolean_is_dangerous():
+    """is_dangerous: 'yes' (string) is rejected by the typebox schema."""
+    r = run_harness({
+        "cmd": "validateSchema",
+        "input": {"questions": [{
+            "header": "x", "question": "q?", "type": "free_text",
+            "is_dangerous": "yes",
+        }]},
+    })
+    assert r["ok"] is False
+    assert "boolean" in r["reason"].lower()
+
+
 def test_schema_uses_v2_name():
     """AskUserQuestionParams is the exported schema."""
     # Smoke test: schema validates the new shape (max 4 per call)

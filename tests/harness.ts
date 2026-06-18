@@ -3,7 +3,7 @@
 // schema/normalize/answers modules, emits JSON results on stdout.
 // Used by the Python pytest suite to test against the real TypeScript code.
 
-import { AskUserQuestionParams, validateSemantics } from "../src/schema.ts";
+import { AskUserQuestionParams, validateSchema, validateSemantics } from "../src/schema.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
 import {
 	coerceNumber,
@@ -47,6 +47,10 @@ async function main() {
 			case "validate": {
 				const v = validateSemantics(cmd.input as never);
 				result = v;
+				break;
+			}
+			case "validateSchema": {
+				result = validateSchema(cmd.input);
 				break;
 			}
 			case "detectLegacyFields": {

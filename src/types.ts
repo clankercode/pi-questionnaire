@@ -39,6 +39,10 @@ export interface CanonicalQuestion {
 	/** free_text only */
 	placeholder?: string;
 	multiline?: boolean;
+	/** True only when the caller explicitly flagged the question as dangerous.
+	 * Undefined (not false) when unset, so the TUI can distinguish
+	 * "no flag" from "explicitly not dangerous". */
+	is_dangerous?: boolean;
 }
 
 /** Raw question shape accepted at the tool boundary. v1 aliases are rejected
@@ -55,6 +59,9 @@ export interface RawQuestion {
 	max?: number;
 	placeholder?: string;
 	multiline?: boolean;
+	/** Optional: caller marks the question as dangerous. When true, the TUI
+	 * requires the user to type an explicit confirmation string. */
+	is_dangerous?: boolean;
 }
 
 export interface RawAskUserQuestionParams {
