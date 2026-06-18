@@ -549,21 +549,38 @@ function connect(){
 }
 function send(message){ if(socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
 function sendDebounced(message){ clearTimeout(sendTimer); sendTimer = setTimeout(() => send(message), 120); }
+function currentAnswer(i){ return state.answers[String(i)]; }
+function optionValue(opt){ return opt.isOther ? '__other__' : opt.label; }
+function isOtherAnswer(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'other'; }
+function choiceValue(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'option' ? answer.value : undefined; }
+function isChoiceChecked(q,i,opt){
+  const answer = currentAnswer(i);
+  if(q.type === 'select_many'){
+    return Array.isArray(answer) && answer.some(x => opt.isOther ? isOtherAnswer(x) : choiceValue(x) === opt.label);
+  }
+  return opt.isOther ? isOtherAnswer(answer) : choiceValue(answer) === (q.type === 'confirm_enum' && opt.label === 'Affirm' ? 'affirm' : q.type === 'confirm_enum' && opt.label === 'Decline' ? 'decline' : opt.label);
+}
+function otherAnswerText(i){
+  const answer = currentAnswer(i);
+  if(Array.isArray(answer)){ const other = answer.find(isOtherAnswer); return other ? other.text || '' : ''; }
+  return isOtherAnswer(answer) ? answer.text || '' : '';
+}
 function answerValue(q,i,el){
   if(q.type === 'select_one') return el.value === '__other__' ? (document.getElementById('other-'+i).value || '') : el.value;
   if(q.type === 'select_many') return Array.from(document.querySelectorAll('[name="q'+i+'"]:checked')).map(x => x.value === '__other__' ? (document.getElementById('other-'+i).value || '') : x.value).filter(Boolean);
   if(q.type === 'confirm_enum') return el.value;
-  if(q.type === 'number') return Number(el.value);
+  if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
 }
 function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); render(); }
+function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function render(){
   const root = document.getElementById('questions'); root.innerHTML = '';
   document.getElementById('overlay').classList.toggle('visible', state.currentTab === state.questions.length);
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';
-    section.onclick = (event) => { if(event.target === section) setTab(i); };
+    section.onclick = () => activateQuestion(i);
     const fieldset = document.createElement('fieldset');
     const opts = state.renderOptions[String(i)] || q.options || [];
     if(q.type === 'select_one' || q.type === 'confirm_enum'){
@@ -575,26 +592,29 @@ function render(){
       if(q.type === 'number') input.type = 'number'; else if(input.tagName === 'INPUT') input.type = 'text';
       if(q.min !== undefined) input.min = q.min; if(q.max !== undefined) input.max = q.max;
       input.placeholder = q.placeholder || '';
-      const current = state.answers[String(i)]; if(current !== undefined) input.value = current;
-      input.oninput = () => sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)});
+      const current = currentAnswer(i); if(current !== undefined) input.value = current;
+      input.onfocus = () => activateQuestion(i);
+      input.oninput = () => { activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
       fieldset.appendChild(input);
     }
     section.appendChild(fieldset);
     const notes = document.createElement('textarea'); notes.placeholder = 'Notes'; notes.value = (state.options.notes || {})[q.id] || '';
-    notes.oninput = () => { const next = {...(state.options.notes || {}), [q.id]: notes.value}; state.options.notes = next; sendDebounced({type:'options', options:{notes:next}}); };
+    notes.onfocus = () => activateQuestion(i);
+    notes.oninput = () => { activateQuestion(i); const next = {...(state.options.notes || {}), [q.id]: notes.value}; state.options.notes = next; sendDebounced({type:'options', options:{notes:next}}); };
     section.appendChild(notes);
     root.appendChild(section);
   });
 }
 function addChoice(parent,q,i,opt,j,kind){
   const label = document.createElement('label'); label.className = 'row';
-  const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = opt.isOther ? '__other__' : opt.label;
-  input.onchange = () => send({type:'answer', questionId:q.id, value:answerValue(q,i,input)});
+  const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
+  input.onfocus = () => activateQuestion(i);
+  input.onchange = () => { activateQuestion(i); send({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
   label.appendChild(input); label.append(' '+opt.label);
   parent.appendChild(label);
   if(opt.description){ const d=document.createElement('div'); d.className='muted'; d.textContent=opt.description; parent.appendChild(d); }
-  if(opt.preview){ const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(q.id+':'+j)?'Hide preview':'Show preview'; b.onclick=()=>{ const key=q.id+':'+j; expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(q.id+':'+j)){ const p=document.createElement('pre'); p.className='preview'; p.textContent='['+opt.preview.type+']\n'+opt.preview.content; parent.appendChild(p); } }
-  if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.oninput=()=>sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); parent.appendChild(other); }
+  if(opt.preview){ const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(q.id+':'+j)?'Hide preview':'Show preview'; b.onclick=()=>{ activateQuestion(i); const key=q.id+':'+j; expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(q.id+':'+j)){ const p=document.createElement('pre'); p.className='preview'; p.textContent='['+opt.preview.type+']\n'+opt.preview.content; parent.appendChild(p); } }
+  if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); }; parent.appendChild(other); }
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ const q=state.questions[state.currentTab]; if(q){ expanded.has(q.id+':0')?expanded.delete(q.id+':0'):expanded.add(q.id+':0'); render(); } } });
 document.getElementById('submit').onclick = () => send({type:'submit'});

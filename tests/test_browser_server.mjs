@@ -198,3 +198,43 @@ test("browser websocket accepts answer, tab, submit, and cancel messages", async
 		await handle.stop();
 	}
 });
+
+test("browser page script restores answers and auto-tabs on control focus", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.equal(page.response.status, 200);
+		assert.match(page.text, /input\.checked = isChoiceChecked/);
+		assert.match(page.text, /other\.value = otherAnswerText\(i\)/);
+		assert.match(page.text, /input\.onfocus = \(\) => activateQuestion\(i\)/);
+		assert.match(page.text, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
+		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("empty number answers are ignored instead of coerced to zero", async () => {
+	const numberQuestions = normalizeQuestions([
+		{ id: "count", header: "Count", question: "How many?", type: "number", min: 0 },
+	]);
+	const events = [];
+	const handle = await startBrowserSyncServer({
+		questions: numberQuestions,
+		preferredPort: 0,
+		onAnswer: (questionId, value) => events.push({ questionId, value }),
+	});
+	let client;
+	try {
+		client = await connectWs(handle);
+		await client.nextMessage("state");
+		client.send({ type: "answer", questionId: "count", value: null });
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		assert.deepEqual(events, []);
+		client.send({ type: "ping" });
+		assert.deepEqual(await client.nextMessage("pong"), { type: "pong" });
+	} finally {
+		client?.close();
+		await handle.stop();
+	}
+});
