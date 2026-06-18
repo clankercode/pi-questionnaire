@@ -245,7 +245,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		const notes: Record<string, string> = {};
 		const answers = new Map<string, TuiAnswer>();
 		let viewMode: ViewMode = "answer";
-		let inputMode: "text" | "number" | "other" | "free_text" | "notes" | null = null;
+		let inputMode: "text" | "number" | "other" | "free_text" | "notes" | "danger" | null = null;
 		let inputQuestionId: string | null = null;
 		let browserUrl: string | null = null;
 		let lastBrowserOpenAttempt: { url: string; at: number } | null = null;
@@ -278,6 +278,54 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function refresh() {
 			tui.requestRender();
+		}
+
+		// is_dangerous questions require the user to type a confirmation
+		// string before the answer is accepted — modeled on GitHub's
+		// "type the repo name to confirm deletion" pattern. Gate the
+		// behavior behind the user-controlled setting so it can be turned
+		// off in trusted environments. Reads the setting dynamically
+		// (not cached at component creation) so tests can flip it via
+		// setInMemorySettings without remounting.
+		function isDangerActive(q: CanonicalQuestion): boolean {
+			if (q.is_dangerous !== true) return false;
+			return getSettings().dangerCheckEnabled === true;
+		}
+
+		// Keep `inputMode` in sync with the current question. Called from
+		// render() so any tab change (or mount) drives the editor into the
+		// right mode without every call-site having to remember to do it.
+		// Idempotent: if state already matches, no changes are made.
+		function reconcileMode() {
+			const q = currentQuestion();
+			if (!q) {
+				// On Submit tab or invalid: drop out of danger mode only if
+				// we were in it. Other inputModes are user-driven and stay.
+				if (inputMode === "danger") {
+					inputMode = null;
+					inputQuestionId = null;
+					editor.setText("");
+				}
+				return;
+			}
+			if (isDangerActive(q)) {
+				if (inputMode !== "danger" || inputQuestionId !== q.id) {
+					inputMode = "danger";
+					inputQuestionId = q.id;
+					// Pre-fill editor with previous answer on revisit (the
+					// free_text answer value is a string, not a discriminated
+					// union, so the value comes through as-is).
+					const prev = answers.get(q.id)?.value;
+					editor.setText(typeof prev === "string" ? prev : "");
+				}
+				return;
+			}
+			// Non-danger question: leave danger mode if we were in it.
+			if (inputMode === "danger") {
+				inputMode = null;
+				inputQuestionId = null;
+				editor.setText("");
+			}
 		}
 
 		function currentQuestion(): CanonicalQuestion | undefined {
@@ -318,6 +366,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 			optionIndex = 0;
 			refresh();
+			reconcileMode(); // open the editor on the next tab if it's a danger question
 		}
 
 		function submit() {
@@ -437,6 +486,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				saveAnswer(q, ans);
 			} else if (inputMode === "free_text") {
 				saveAnswer(q, value);
+			} else if (inputMode === "danger") {
+				// Gate: empty / whitespace-only must NOT commit. Stay in
+				// danger mode (don't reset inputMode, don't advance) so the
+				// user can retry. Don't show any error toast — the visual
+				// state is already clear (empty editor visible).
+				if (value.trim() === "") {
+					return;
+				}
+				saveAnswer(q, value);
 			} else if (inputMode === "text") {
 				saveAnswer(q, value.trim());
 			} else if (inputMode === "notes") {
@@ -494,12 +552,28 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (matchesKey(data, Key.escape)) {
 					if (inputMode === "notes") {
 						closeNotes();
+					} else if (inputMode === "danger") {
+						// Esc cancels the whole questionnaire (same as the
+						// top-level Esc behavior). Spec: danger confirmation
+						// is an atomic action — there is no "back out of the
+						// editor but stay on the question" path.
+						cancel();
+						return;
 					} else {
 						inputMode = null;
 						inputQuestionId = null;
 						editor.setText("");
 						refresh();
 					}
+					return;
+				}
+				// Danger mode has no options to navigate; Up/Down are
+				// explicitly suppressed so the editor's own history cursor
+				// doesn't move around behind the user.
+				if (
+					inputMode === "danger" &&
+					(matchesKey(data, Key.up) || matchesKey(data, Key.down))
+				) {
 					return;
 				}
 				if (inputMode === "number" && matchesKey(data, Key.up)) {
@@ -585,17 +659,20 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					currentTab = Math.max(0, currentTab - 1);
 					optionIndex = 0;
 					refresh();
+					reconcileMode(); // drive inputMode to match the new tab
 					return;
 				}
 				if (data === "]") {
 					currentTab = Math.min(questions.length, currentTab + 1);
 					optionIndex = 0;
 					refresh();
+					reconcileMode();
 					return;
 				}
 				if (data === "0") {
 					currentTab = questions.length;
 					refresh();
+					reconcileMode();
 					return;
 				}
 				// Meta+1..4: jump to question. ESC + digit arrives as "\x1b1" (2 chars).
@@ -605,6 +682,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						currentTab = n;
 						optionIndex = 0;
 						refresh();
+						reconcileMode();
 						return;
 					}
 				}
@@ -712,7 +790,38 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			return lastBrowserOpenAttempt;
 		}
 
+		// Append the trailing status block (duration timer, browser URL,
+		// note indicator) to a render buffer. Shared between the normal
+		// question view and the is_dangerous confirmation view so both
+		// stay in sync if the format evolves.
+		function appendStatusLines(
+			lines: string[],
+			q: CanonicalQuestion,
+			theme: any,
+			askedAtMs: number,
+			notesMap: Record<string, string>,
+			browser: string | null,
+		) {
+			const note = notesMap[q.id];
+			const noteIndicator = note ? " 📝" : "";
+			const elapsed = formatElapsed(Date.now() - askedAtMs);
+			lines.push("");
+			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
+			if (browser) {
+				lines.push(theme.fg("muted", `🌐 ${browser} (press o to open)`));
+			}
+			if (noteIndicator) {
+				lines.push(theme.fg("muted", `Note: ${note}`));
+			}
+		}
+
 		function render(width: number): string[] {
+			// Keep the inputMode in sync with the active question. Done at
+			// the top of render() so any tab change (or the first mount)
+			// drives the editor into the right state without every callsite
+			// having to remember to invoke reconcileMode().
+			reconcileMode();
+
 			// Help overlay
 			if (viewMode === "help") {
 				return KEYMAP_HELP.map((l) => theme.fg("muted", l));
@@ -731,7 +840,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const text = `${marker} ${q.header}`;
 					tabs.push(active ? theme.fg("accent", text) : theme.fg("muted", text));
 				}
-				tabs.push(currentTab === questions.length ? theme.fg("accent", "Submit") : theme.fg("muted", "Submit"));
+				// Hide the Submit tab while on a danger question: the danger
+				// flow is atomic (Enter on the editor commits that single
+				// question), so there is nothing for a Submit review step to
+				// do — and we don't want the user to skip past the
+				// confirmation by jumping to Submit.
+				const activeQ = currentQuestion();
+				const onDanger = activeQ !== undefined && isDangerActive(activeQ);
+				if (!onDanger) {
+					tabs.push(currentTab === questions.length ? theme.fg("accent", "Submit") : theme.fg("muted", "Submit"));
+				}
 				lines.push(tabs.join("  "));
 				lines.push("");
 			}
@@ -768,6 +886,28 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				addWrapped(lines, theme.fg("muted", q.description), width);
 			}
 			lines.push("");
+
+			// is_dangerous confirmation editor. Renders BEFORE the type-
+			// specific UI so the warning header replaces the normal header
+			// and the type-specific widget (options, etc.) is skipped. The
+			// editor itself is rendered by the TUI host, not inline.
+			if (isDangerActive(q)) {
+				lines.push(
+					theme.fg("warning", theme.bold(`⚠️  DESTRUCTIVE — ${q.header}`)),
+				);
+				lines.push("");
+				lines.push(theme.fg("warning", q.question));
+				if (q.description) {
+					lines.push("");
+					addWrapped(lines, theme.fg("muted", q.description), width);
+				}
+				lines.push("");
+				lines.push(theme.fg("accent", "Type the resource name to confirm:"));
+				lines.push("");
+				lines.push(theme.fg("muted", "[Enter] confirm  [Esc] cancel"));
+				appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);
+				return lines;
+			}
 
 			// Notes mode for this question
 			if (viewMode === "notes") {
@@ -850,22 +990,18 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 
 			// Status line: duration timer + notes indicator + browser URL
-			const note = notes[q.id];
-			const noteIndicator = note ? theme.fg("accent", " 📝") : "";
-			const elapsed = formatElapsed(Date.now() - askedAt);
-			lines.push("");
-			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
-			if (browserUrl) {
-				lines.push(theme.fg("muted", `🌐 ${browserUrl} (press o to open)`));
-			}
-			if (noteIndicator) {
-				lines.push(theme.fg("muted", `Note: ${note}`));
-			}
+			appendStatusLines(lines, q, theme, askedAt, notes, browserUrl);
 			// Suppress unused warning for the helper
 			void getOptionByIdx;
 
 			return lines;
 		}
+
+		// Initial sync: if the first question is in danger mode, open the
+		// editor immediately so the very first keypress is routed into it
+		// (without this, the user would have to call render() once before
+		// handleInput for inputMode to settle correctly).
+		reconcileMode();
 
 		return {
 			render,
@@ -876,6 +1012,12 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// Exposed for slice 5+ to wire up
 			setBrowserUrl,
 			getBrowserOpenAttempt,
+			// Test helpers: read/write the editor's text directly. Used by
+			// the is_dangerous tests to verify the revisit prefill path
+			// (after re-mounting / navigating back) without having to drive
+			// a full terminal-input sequence.
+			getEditorText: () => editor.getText(),
+			setEditorText: (text: string) => editor.setText(text),
 			// Clear the duration timer (called on done or session shutdown)
 			dispose,
 		};

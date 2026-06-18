@@ -973,3 +973,141 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 		assert.equal(bareBel.length, 1, "dispose path: bell fires exactly once on mount");
 	}
 });
+
+// ============================================================================
+// is_dangerous TUI flow (gated by settings.dangerCheckEnabled)
+// ============================================================================
+
+test("is_dangerous: warning header + prompt shown when dangerCheckEnabled is true", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const { lines } = render([{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}]);
+		const joined = lines.join("\n");
+		assert.match(joined, /⚠️/, "should include warning marker");
+		assert.match(joined, /DESTRUCTIVE/, "should include DESTRUCTIVE label");
+		assert.match(joined, /Type the resource name to confirm/, "should include confirmation prompt");
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("is_dangerous: empty editor + Enter does NOT commit", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const { component, getDone } = drive([{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}]);
+		// No typing. Just press Enter.
+		component.handleInput("\r");
+		assert.equal(getDone(), null, "empty Enter must not commit; should stay in danger mode");
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("is_dangerous: non-empty editor + Enter commits typed text as free_text answer", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const { component, getDone } = drive([{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}]);
+		// Type "production-db" character by character.
+		for (const ch of "production-db") {
+			component.handleInput(ch);
+		}
+		component.handleInput("\r");
+		const v = getDone();
+		assert.ok(v !== null, "Enter with non-empty text must commit");
+		if (v) {
+			assert.equal(v.lifecycle, "answered");
+			assert.equal(v.answers.length, 1);
+			assert.equal(v.answers[0].type, "free_text");
+			assert.equal(v.answers[0].value, "production-db");
+		}
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("is_dangerous: revisit prepopulates the editor with the previous answer", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const questions = [
+			{ id: "d", header: "Drop", question: "Drop the database?", type: "free_text", is_dangerous: true },
+			{ id: "o", header: "Other", question: "Anything else?", type: "free_text" },
+		];
+		const { component, getDone } = drive(questions);
+		// On question 0 (danger): editor is open, empty. Type "production-db".
+		for (const ch of "production-db") {
+			component.handleInput(ch);
+		}
+		component.handleInput("\r");
+		// After commit, advance to question 1.
+		// Navigate back to question 0 (danger revisit).
+		component.handleInput("[");
+		// Editor should now be pre-filled with "production-db".
+		assert.equal(
+			typeof component.getEditorText === "function",
+			true,
+			"factory should expose getEditorText for revisit verification",
+		);
+		assert.equal(component.getEditorText(), "production-db");
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("is_dangerous: dangerCheckEnabled false falls through to normal free_text behavior", () => {
+	setInMemorySettings({ dangerCheckEnabled: false });
+	try {
+		const { lines } = render([{
+			header: "Drop",
+			question: "Drop the database?",
+			type: "free_text",
+			is_dangerous: true,
+		}]);
+		const joined = lines.join("\n");
+		assert.doesNotMatch(joined, /⚠️/, "no warning marker when setting is off");
+		assert.doesNotMatch(joined, /DESTRUCTIVE/, "no DESTRUCTIVE label when setting is off");
+		assert.doesNotMatch(joined, /Type the resource name to confirm/, "no confirmation prompt when setting is off");
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("is_dangerous: is_dangerous=false (or undefined) uses normal free_text behavior", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		// Explicitly false
+		const { lines: a } = render([{
+			header: "Note",
+			question: "Anything to add?",
+			type: "free_text",
+			is_dangerous: false,
+		}]);
+		assert.doesNotMatch(a.join("\n"), /⚠️/);
+		assert.doesNotMatch(a.join("\n"), /DESTRUCTIVE/);
+
+		// Undefined
+		const { lines: b } = render([{
+			header: "Note",
+			question: "Anything to add?",
+			type: "free_text",
+		}]);
+		assert.doesNotMatch(b.join("\n"), /⚠️/);
+		assert.doesNotMatch(b.join("\n"), /DESTRUCTIVE/);
+	} finally {
+		clearInMemorySettings();
+	}
+});
