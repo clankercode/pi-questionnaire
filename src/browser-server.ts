@@ -624,10 +624,33 @@ function addChoice(parent,q,i,opt,j,kind){
   label.appendChild(input); label.append(' '+opt.label);
   parent.appendChild(label);
   if(opt.description){ const d=document.createElement('div'); d.className='muted'; d.textContent=opt.description; parent.appendChild(d); }
-  if(opt.preview){ const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(q.id+':'+j)?'Hide preview':'Show preview'; b.onclick=()=>{ activateQuestion(i); const key=q.id+':'+j; expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(q.id+':'+j)){ const p=document.createElement('pre'); p.className='preview'; p.textContent='['+opt.preview.type+']\n'+opt.preview.content; parent.appendChild(p); } }
+  if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
   if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); }; parent.appendChild(other); }
 }
-document.addEventListener('keydown', event => { if(event.key === 'e'){ const q=state.questions[state.currentTab]; if(q){ expanded.has(q.id+':0')?expanded.delete(q.id+':0'):expanded.add(q.id+':0'); render(); } } });
+function renderPreview(parent,preview){
+  const box=document.createElement('div'); box.className='preview preview-'+preview.type;
+  if(preview.type === 'html' || preview.type === 'svg'){
+    const iframe=document.createElement('iframe'); iframe.sandbox=''; iframe.style.width='100%'; iframe.style.minHeight='140px'; iframe.srcdoc=preview.type === 'svg' ? preview.content : preview.content; box.appendChild(iframe);
+  } else if(preview.type === 'markdown'){
+    box.innerHTML = renderMarkdown(preview.content);
+  } else if(preview.type === 'code'){
+    const pre=document.createElement('pre'); const code=document.createElement('code'); code.textContent=preview.content; pre.appendChild(code); box.appendChild(pre);
+  } else {
+    const pre=document.createElement('pre'); pre.textContent='['+preview.type+']\n'+preview.content; box.appendChild(pre);
+  }
+  parent.appendChild(box);
+}
+function renderMarkdown(markdown){
+  return escapeHtml(markdown)
+    .replace(/^### (.*)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.*)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.*)$/gm,'<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(new RegExp(String.fromCharCode(96)+'([^'+String.fromCharCode(96)+']+)'+String.fromCharCode(96),'g'),'<code>$1</code>')
+    .replace(/\n/g,'<br>');
+}
+document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
+function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
 document.getElementById('submit').onclick = () => send({type:'submit'});
 document.getElementById('cancel').onclick = () => send({type:'cancel'});
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
