@@ -450,6 +450,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				lines.push("");
 
 				// Edit mode for text/number — show editor with prompt
+				if (q.type === "text" || q.type === "number") {
+					if (q.type === "number" && (q.min !== undefined || q.max !== undefined)) {
+						const range = [q.min, q.max].filter((n) => n !== undefined).join("…");
+						addWrappedWithPrefix(lines, " ", theme.fg("dim", `range: ${range}`), W);
+					}
+				}
+
 				if ((q.type === "text" || q.type === "number") && (inputMode || answers.has(q.id))) {
 					const placeholder = q.placeholder ?? (q.type === "number" ? "0" : "type your answer…");
 					addWrappedWithPrefix(lines, " ", theme.fg("muted", `> ${placeholder}`), W);
