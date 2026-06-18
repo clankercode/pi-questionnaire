@@ -3,6 +3,21 @@ import assert from "node:assert/strict";
 import extension from "../src/index.ts";
 import { clearInMemorySettings, setInMemorySettings } from "../src/settings.ts";
 
+const fakeTheme = {
+	fg: (_color, text) => text,
+	bg: (_color, text) => text,
+	bold: (text) => text,
+	italic: (text) => text,
+	strikethrough: (text) => text,
+};
+
+function fakeTui() {
+	return {
+		requestRender() {},
+		terminal: { rows: 24, cols: 100 },
+	};
+}
+
 function registerExtension() {
 	const tools = [];
 	const commands = [];
@@ -94,6 +109,63 @@ test("AskUserQuestion clears side effects when ctx.ui.custom throws", async () =
 	assert.equal(clears.length, 1, "pending side effects should be cleared in finally");
 	assert.equal(clears[0].kind, "timeout");
 	assert.equal(timeouts[0].cleared, true);
+});
+
+test("AskUserQuestion starts browser server, injects URL, and stops server after submit", async () => {
+	const pi = {
+		registerTool(tool) {
+			this.tool = tool;
+		},
+		registerCommand() {},
+		sendMessage: async () => {},
+	};
+	extension(pi);
+	setInMemorySettings({
+		browserEnabled: true,
+		browserMinQuestions: 1,
+		browserAutoOpen: false,
+		copyUrlToClipboard: false,
+		bellOnQuestion: false,
+	});
+	let rendered = "";
+	try {
+		const result = await pi.tool.execute(
+			"call-browser",
+			{
+				questions: [
+					{ header: "Pick", question: "Pick?", type: "select_one", options: [{ label: "A" }] },
+					{ header: "Note", question: "Note?", type: "free_text" },
+				],
+			},
+			new AbortController().signal,
+			() => {},
+			{
+				mode: "tui",
+				ui: {
+					custom: async (build) => {
+						let doneValue = null;
+						const component = build(fakeTui(), fakeTheme, {}, (value) => {
+							doneValue = value;
+						});
+						rendered = component.render(100).join("\n");
+						component.handleInput("\r"); // select first option, advance to free_text
+						component.handleInput("o");
+						component.handleInput("k");
+						component.handleInput("\r"); // commit free_text, advance to submit
+						component.handleInput("\r"); // submit
+						return doneValue;
+					},
+				},
+			},
+		);
+		assert.match(rendered, /http:\/\/127\.0\.0\.1:\d+\/q\//);
+		assert.equal(result.details.lifecycle, "answered");
+		assert.match(result.details.url, /http:\/\/127\.0\.0\.1:\d+\/q\//);
+		assert.equal(typeof result.details.port, "number");
+		await assert.rejects(fetch(`http://127.0.0.1:${result.details.port}/healthz`));
+	} finally {
+		clearInMemorySettings();
+	}
 });
 
 test("AskUserQuestion tool and settings command register", () => {

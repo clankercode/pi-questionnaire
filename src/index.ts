@@ -1,14 +1,14 @@
 // src/index.ts
 // Pi extension entry point. Registers the `AskUserQuestion` tool (v2).
 // v2 surface: 5 question types, browser-sync URL, notes, persistent checkmarks.
-// HTTP server + WebSocket + browser page land in slice 5+.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { AskUserQuestionParams, validateSemantics } from "./schema.ts";
 import { normalizeQuestions } from "./normalize.ts";
 import { buildQuestionnaireComponent, type TuiResult } from "./tui.ts";
-import { fireOnQuestionSideEffects } from "./side-effects.ts";
+import { startBrowserSyncServer, type BrowserSyncServerHandle } from "./browser-server.ts";
+import { fireBrowserUrlSideEffects, fireOnQuestionSideEffects, openBrowserUrl } from "./side-effects.ts";
 import { getSettings, saveSettings } from "./settings.ts";
 import {
 	buildSettingsMenuComponent,
@@ -163,25 +163,61 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// 4. Fire per-setting side effects (notification, TTS, command,
-			// heartbeat, browser-intent log, danger-check log). The handle
-			// owns the heartbeat interval and any pending delayed
-			// notification timer; we MUST call clear() on every return
-			// path below to release them. Settings are read live (no
-			// cache) so live edits to ~/.config or .pi/ pick up here.
-			const sideEffects = fireOnQuestionSideEffects(params, pi);
+			// 4. Start browser sync before the TUI mounts when settings allow.
+			// The server is per-call and is stopped in the finally block below.
+			const settings = getSettings();
+			let browserHandle: BrowserSyncServerHandle | null = null;
+			let activeComponent: any = null;
+			if (settings.browserEnabled && questions.length >= settings.browserMinQuestions) {
+				try {
+					browserHandle = await startBrowserSyncServer({
+						questions,
+						onAnswer: (questionId, value) => activeComponent?.applyBrowserAnswer?.(questionId, value),
+						onTab: (currentTab) => activeComponent?.applyBrowserTab?.(currentTab),
+						onOptions: (options) => activeComponent?.applyBrowserOptions?.(options),
+						onSubmit: () => activeComponent?.applyBrowserSubmit?.(),
+						onCancel: () => activeComponent?.applyBrowserCancel?.(),
+						log: (line) => console.warn(`[pi-questionnaire] ${line}`),
+					});
+				} catch (err) {
+					console.warn(`[pi-questionnaire] Browser sync unavailable: ${(err as Error).message}`);
+				}
+			}
 
-			// 5. Interactive TUI
-			const factory = buildQuestionnaireComponent({ questions });
+			// 5. Fire per-setting side effects (notification, TTS, command,
+			// heartbeat, browser intent/copy/open, danger-check log). The handle
+			// owns the heartbeat interval and any pending delayed notification timer;
+			// we MUST call clear() on every return path below to release them.
+			const sideEffects = fireOnQuestionSideEffects(params, pi);
+			if (browserHandle) {
+				fireBrowserUrlSideEffects(params, browserHandle.url, {
+					log: (line) => console.warn(`[pi-questionnaire] ${line}`),
+				});
+			}
+
+			// 6. Interactive TUI
+			const factory = buildQuestionnaireComponent({
+				questions,
+				onBrowserStateChange: (patch) => browserHandle?.updateFromTui(patch),
+			});
 			let result: TuiResult | undefined;
 			try {
-				result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) =>
-					factory(tui, theme, kb, done),
-				);
+				result = await ctx.ui.custom<TuiResult>((tui, theme, kb, done) => {
+					const component = factory(tui, theme, kb, done);
+					activeComponent = component;
+					if (browserHandle) {
+						component.setBrowserUrl?.(browserHandle.url);
+						component.setBrowserOpenHandler?.((url: string) => openBrowserUrl(url, {
+							log: (line) => console.warn(`[pi-questionnaire] ${line}`),
+						}));
+					}
+					return component;
+				});
 			} finally {
-				// Release the heartbeat + delayed-notification timer even if
-				// the TUI throws or the session aborts mid-render.
+				// Release timers and the per-call browser server even if the TUI throws
+				// or the session aborts mid-render.
 				sideEffects.clear();
+				await browserHandle?.stop();
 			}
 
 			if (!result || result.lifecycle === "cancelled") {
@@ -191,6 +227,8 @@ export default function (pi: ExtensionAPI) {
 						questions,
 						answers: {},
 						lifecycle: "cancelled",
+						url: browserHandle?.url ?? null,
+						port: browserHandle?.port ?? null,
 					},
 				};
 			}
@@ -219,6 +257,8 @@ export default function (pi: ExtensionAPI) {
 					answers,
 					...(result.notes ? { notes: result.notes } : {}),
 					lifecycle: "answered",
+					url: browserHandle?.url ?? null,
+					port: browserHandle?.port ?? null,
 					debounceMs: getSettings().debounceMs,
 				} as ToolResultDetails & { debounceMs: number },
 			};

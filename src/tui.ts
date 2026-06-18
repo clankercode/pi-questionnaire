@@ -50,12 +50,21 @@ export interface TuiOptions {
 	/** Browser-origin updates suppress immediate TUI redraws and refresh
 	 * after this idle window. Production default is 3s; tests override. */
 	browserIdleMs?: number;
+	/** Called when TUI-origin state changes should be broadcast to browser clients. */
+	onBrowserStateChange?: (patch: BrowserTuiStatePatch) => void;
 }
 
 export interface BrowserTuiState {
 	currentTab: number;
 	answers: Record<string, AnswerValue>;
 	notes: Record<string, string>;
+}
+
+export interface BrowserTuiStatePatch {
+	currentTab?: number;
+	answers?: Record<string, AnswerValue>;
+	notes?: Record<string, string>;
+	lifecycle?: "open" | "submitted" | "cancelled";
 }
 
 // ---- Tabs -----------------------------------------------------------------
@@ -444,10 +453,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			return true;
 		}
 
-		function saveAnswer(q: CanonicalQuestion, value: AnswerValue) {
+		function saveAnswer(q: CanonicalQuestion, value: AnswerValue, notifyBrowser = true) {
 			const idx = questions.findIndex((x) => x.id === q.id);
 			answers.set(q.id, { id: q.id, index: idx, type: q.type, value });
 			syncCheckedFromAnswer(q, value);
+			if (notifyBrowser) opts.onBrowserStateChange?.({ answers: getBrowserState().answers });
 		}
 
 		function syncCheckedFromAnswer(q: CanonicalQuestion, value: AnswerValue) {
@@ -481,6 +491,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				currentTab = questions.length; // Submit tab
 			}
 			optionIndex = 0;
+			opts.onBrowserStateChange?.({ currentTab });
 			refresh();
 			reconcileMode(); // open the editor on the next tab if it's a danger question
 		}
@@ -489,6 +500,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (durationTimer !== null) clearInterval(durationTimer);
 			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
+			opts.onBrowserStateChange?.({ lifecycle: "submitted" });
 			done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
 		}
 
@@ -496,6 +508,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (durationTimer !== null) clearInterval(durationTimer);
 			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
+			opts.onBrowserStateChange?.({ lifecycle: "cancelled" });
 			done({ answers: [], notes, lifecycle: "cancelled" });
 		}
 
@@ -719,17 +732,19 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 		}
 
-		function closeNotes(opts: { advanceTab?: boolean } = {}) {
+		function closeNotes(closeOpts: { advanceTab?: boolean } = {}) {
 			persistNotesDraft();
 			inputMode = null;
 			inputQuestionId = null;
 			viewMode = "answer";
 			editor.setText("");
-			if (opts.advanceTab === true && isMulti) {
+			if (closeOpts.advanceTab === true && isMulti) {
 				currentTab = Math.min(questions.length, currentTab + 1);
 				optionIndex = 0;
+			opts.onBrowserStateChange?.({ currentTab });
 				reconcileMode();
 			}
+			opts.onBrowserStateChange?.({ notes: { ...notes } });
 			refresh();
 		}
 
@@ -911,6 +926,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (data === "[" || data === "\x1b[D") {
 					currentTab = Math.max(0, currentTab - 1);
 					optionIndex = 0;
+					opts.onBrowserStateChange?.({ currentTab });
 					refresh();
 					reconcileMode(); // drive inputMode to match the new tab
 					return;
@@ -919,12 +935,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (data === "]" || data === "\x1b[C") {
 					currentTab = Math.min(questions.length, currentTab + 1);
 					optionIndex = 0;
+					opts.onBrowserStateChange?.({ currentTab });
 					refresh();
 					reconcileMode();
 					return;
 				}
 				if (data === "0") {
 					currentTab = questions.length;
+					opts.onBrowserStateChange?.({ currentTab });
 					refresh();
 					reconcileMode();
 					return;
@@ -935,6 +953,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					if (n < questions.length) {
 						currentTab = n;
 						optionIndex = 0;
+						opts.onBrowserStateChange?.({ currentTab });
 						refresh();
 						reconcileMode();
 						return;
@@ -1113,7 +1132,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function applyBrowserAnswer(questionId: string, value: AnswerValue) {
 			const q = questions.find((question) => question.id === questionId);
 			if (!q) return;
-			saveAnswer(q, value);
+			saveAnswer(q, value, false);
 			scheduleBrowserRefresh();
 		}
 

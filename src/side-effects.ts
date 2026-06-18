@@ -41,7 +41,7 @@
 // All spawns are wrapped in try/catch — side effects must NEVER break
 // the tool. The TUI is shown even if every side effect fails.
 
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { writeFileSync as nodeWriteFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -70,6 +70,7 @@ export interface SpawnRecord {
  * to inject mocks. */
 export interface SideEffectDeps {
 	spawn?: typeof spawn;
+	spawnSync?: typeof spawnSync;
 	randomBytes?: (n: number) => Buffer;
 	writeFileSync?: typeof nodeWriteFileSync;
 	setInterval?: typeof setInterval;
@@ -139,6 +140,89 @@ export function notificationCommand(
 export function ttsCommand(header: string): { cmd: string; args: string[] } {
 	const safe = header || "Question";
 	return { cmd: "attn", args: [`AskUserQuestion: ${safe}`] };
+}
+
+export function browserOpenCommand(
+	platform: NodeJS.Platform,
+	url: string,
+): { cmd: string; args: string[]; shell?: boolean } {
+	if (platform === "darwin") return { cmd: "open", args: [url] };
+	if (platform === "win32") return { cmd: "cmd", args: ["/c", "start", "", url], shell: false };
+	return { cmd: "xdg-open", args: [url] };
+}
+
+export function clipboardCommand(
+	platform: NodeJS.Platform,
+): { cmd: string; args: string[] } {
+	if (platform === "darwin") return { cmd: "pbcopy", args: [] };
+	if (platform === "win32") return { cmd: "clip", args: [] };
+	return { cmd: "xclip", args: ["-selection", "clipboard"] };
+}
+
+function commandExists(cmd: string, platform: NodeJS.Platform, doSpawnSync: typeof spawnSync): boolean {
+	const check = platform === "win32"
+		? doSpawnSync("where", [cmd], { stdio: "ignore" })
+		: doSpawnSync("command", ["-v", cmd], { shell: true, stdio: "ignore" });
+	return check.status === 0;
+}
+
+export function openBrowserUrl(
+	url: string,
+	deps: Pick<SideEffectDeps, "spawn" | "platform" | "log"> = {},
+): void {
+	const doSpawn = deps.spawn ?? spawn;
+	const platform = deps.platform ?? process.platform;
+	const log = deps.log ?? NO_LOG;
+	try {
+		const { cmd, args, shell } = browserOpenCommand(platform, url);
+		const child = doSpawn(cmd, args, { detached: true, stdio: "ignore", shell });
+		child.unref?.();
+	} catch (err) {
+		log(`browser open failed: ${(err as Error).message}`);
+	}
+}
+
+export function copyBrowserUrlToClipboard(
+	url: string,
+	deps: Pick<SideEffectDeps, "spawn" | "spawnSync" | "platform" | "log"> = {},
+): void {
+	const doSpawn = deps.spawn ?? spawn;
+	const doSpawnSync = deps.spawnSync ?? spawnSync;
+	const platform = deps.platform ?? process.platform;
+	const log = deps.log ?? NO_LOG;
+	try {
+		const { cmd, args } = clipboardCommand(platform);
+		if (!commandExists(cmd, platform, doSpawnSync)) {
+			log(`clipboard command not found: ${cmd}`);
+			return;
+		}
+		const child = doSpawn(cmd, args, { stdio: ["pipe", "ignore", "ignore"] });
+		child.stdin?.end(url);
+		child.unref?.();
+	} catch (err) {
+		log(`clipboard copy failed: ${(err as Error).message}`);
+	}
+}
+
+export function fireBrowserUrlSideEffects(
+	params: AskUserQuestionInput,
+	url: string,
+	deps: SideEffectDeps = {},
+): string[] {
+	const settings = deps.getSettingsOverride
+		? { ...getSettings(), ...deps.getSettingsOverride }
+		: getSettings();
+	const effects: string[] = [];
+	if (!settings.browserEnabled || params.questions.length < settings.browserMinQuestions) return effects;
+	if (settings.copyUrlToClipboard) {
+		copyBrowserUrlToClipboard(url, deps);
+		effects.push("copyUrlToClipboard");
+	}
+	if (settings.browserAutoOpen) {
+		openBrowserUrl(url, deps);
+		effects.push("browserAutoOpen");
+	}
+	return effects;
 }
 
 export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMessage">>(
@@ -215,9 +299,9 @@ export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMess
 		}
 	}
 
-	// -- 1. Browser side effects (all gated "would" / TODO today) ---------
+	// -- 1. Browser side effects ------------------------------------------
 	if (settings.browserEnabled) {
-		log("browser enabled (slice 5+ would start HTTP server)");
+		log("browser enabled");
 		effects.push("browserEnabled");
 	}
 	if (
@@ -228,7 +312,7 @@ export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMess
 		effects.push("browserAutoOpen");
 	}
 	if (settings.copyUrlToClipboard) {
-		log("would copy URL to clipboard (slice 5+)");
+		log("browser URL will be copied to clipboard if the server starts");
 		effects.push("copyUrlToClipboard");
 	}
 
