@@ -1136,6 +1136,12 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			scheduleBrowserRefresh();
 		}
 
+		function applyBrowserClearAnswer(questionId: string) {
+			answers.delete(questionId);
+			delete checked[questionId];
+			scheduleBrowserRefresh();
+		}
+
 		function applyBrowserOptions(options: { notes?: Record<string, string> }) {
 			if (options.notes) {
 				for (const key of Object.keys(notes)) delete notes[key];
@@ -1479,6 +1485,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			getBrowserState,
 			applyBrowserTab,
 			applyBrowserAnswer,
+			applyBrowserClearAnswer,
 			applyBrowserOptions,
 			applyBrowserSubmit,
 			applyBrowserCancel,
