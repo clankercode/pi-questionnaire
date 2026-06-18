@@ -76,3 +76,59 @@
   unicode, "Other" with empty body, 4-question cap, pag-server v1 compat.
 - **Integration critic**: do schema, normalize, tui, and headless all produce
   the same canonical output for the same input?
+
+## 2026-06-18 — PIRFL review pass (slice 8)
+
+Dispatched the 4 reviewer roles via a sonnet subagent. Findings:
+
+**2 BLOCKERs (both fixed):**
+- `multi_select` answers were never saved. `selectOption` toggled the
+  `checked` Set but never called `saveAnswer`. → Fix: save the array
+  snapshot on each toggle; for single-question, call `done()` immediately.
+  Verified by new e2e test 5 (multi_select with 2 chosen labels).
+- `confirm` returned the string label ("Yes"/"No") instead of a boolean.
+  The schema/validator expected `typeof v === "boolean"`, the headless
+  path used `true`/`false`, but the TUI wrote strings. → Fix: in
+  `selectOption` for `confirm`, save `isYes` (boolean) where isYes is
+  `idx === 0` (Yes is always first). Verified by new e2e test 6.
+
+**1 MAJOR (fixed):**
+- `render()` had side effects that mutated `inputMode` and
+  `inputQuestionId` on every redraw (when the cached lines were
+  invalidated by a resize). This could reset the editor state
+  unexpectedly. → Fix: moved input-mode initialization to `handleInput`
+  on the first relevant keystroke (lazy init).
+
+**2 MINORs (fixed):**
+- "Other" injection could push the option list past the 8-cap (user
+  provides 8, normalizer appends Other, total 9). → Fix: cap user
+  options at 7 in `normalizeQuestion` so the post-Other count is
+  always ≤ 8.
+- `confirmOptions()` was mapped inconsistently — one map added
+  `isOther: false`, the other didn't. → Fix: always set `isOther`
+  in the render path.
+
+**Verification after fixes:**
+- 47/47 pytest pass
+- 15/15 node --test pass (6 new tests for multi_select, confirm,
+  Other, Esc, option cap)
+- 6/6 e2e bash pass (2 new tests for the 2 BLOCKER fixes)
+- Total: 68 test cases, all green
+- TypeScript compiles cleanly
+- Git: 6 atomic commits, pushed to clankercode/pi-questionnaire
+
+**Open known limitations:**
+- v1 doesn't render mermaid/svg as images — previews are text with
+  `[type]` marker. Future enhancement.
+- No timeout/lifecycle="timed_out" path — user must press Esc to
+  cancel. Could add in v2.
+- Multi-select UX could be improved with a "Done" button per
+  question, but Enter-to-commit works for v1.
+
+## Final state
+
+- Public repo: https://github.com/clankercode/pi-questionnaire
+- 68 test cases (47 pytest + 15 node + 6 bash e2e)
+- README, LICENSE, ARCHITECTURE, USAGE all present
+- E2E uses `minimax/MiniMax-M2.7-highspeed` (recorded in MODEL_NOTES.md)
+- PIRFL log complete with all 8 slices documented
