@@ -157,7 +157,38 @@ const KEYMAP_HELP = [
 	"  Press any key to dismiss this help.",
 ];
 
+// ---- Terminal title (OSC 0) --------------------------------------------
+
+/** Set the terminal title via OSC 0. Default writer is process.stdout. */
+export function setTerminalTitle(
+	title: string,
+	write: (s: string) => void = (s) => process.stdout.write(s),
+): void {
+	// OSC 0 ; title ST  (where ST is \x1b\\ or BEL).
+	// We use BEL (\x07) which is the simpler, broadly-supported terminator.
+	write(`\x1b]0;${title}\x07`);
+}
+
+/** Clear the terminal title. */
+export function clearTerminalTitle(
+	write: (s: string) => void = (s) => process.stdout.write(s),
+): void {
+	setTerminalTitle("", write);
+}
+
 // ---- Component factory ----------------------------------------------------
+
+/** Format a duration in ms as a human-readable string (e.g. "1m 23s"). */
+function formatElapsed(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	if (totalSeconds < 60) return `${totalSeconds}s`;
+	const m = Math.floor(totalSeconds / 60);
+	const s = totalSeconds % 60;
+	if (m < 60) return `${m}m ${s.toString().padStart(2, "0")}s`;
+	const h = Math.floor(m / 60);
+	const rm = m % 60;
+	return `${h}h ${rm.toString().padStart(2, "0")}m`;
+}
 
 export function buildQuestionnaireComponent(opts: TuiOptions) {
 	const questions = opts.questions;
@@ -168,6 +199,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 	const totalTabs = questions.length + 1; // + Submit tab
 
 	return (tui: any, theme: any, _kb: any, done: (v: TuiResult) => void) => {
+		// Prefix the terminal title with a bell so the user notices the
+		// questionnaire is waiting. Restored (cleared) on done.
+		const firstHeader = questions[0]?.header ?? "Question";
+		setTerminalTitle(`🔔 AskUserQuestion — ${firstHeader}`);
 		let currentTab = 0;
 		let optionIndex = 0;
 		const checked: Record<string, Set<number>> = {};
@@ -191,6 +226,21 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			},
 		};
 		const editor = new Editor(tui, editorTheme);
+
+		// Duration timer: track when the questionnaire was asked, refresh
+		// the render once per second so the "elapsed" line updates.
+		// unref() so the interval doesn't keep Node alive (esp. in tests).
+		const askedAt = Date.now();
+		let durationTimer: ReturnType<typeof setInterval> | null = null;
+		if (typeof setInterval === "function") {
+			durationTimer = setInterval(() => {
+				tui.requestRender();
+			}, 1000);
+			// Node: don't keep the process alive. (No-op in non-Node runtimes.)
+			const t = durationTimer as unknown as { unref?: () => void };
+			if (typeof t.unref === "function") t.unref();
+		}
+
 		function refresh() {
 			tui.requestRender();
 		}
@@ -233,11 +283,25 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		}
 
 		function submit() {
+			if (durationTimer !== null) clearInterval(durationTimer);
+			clearTerminalTitle();
 			done({ answers: Array.from(answers.values()), notes, lifecycle: "answered" });
 		}
 
 		function cancel() {
+			if (durationTimer !== null) clearInterval(durationTimer);
+			clearTerminalTitle();
 			done({ answers: [], notes, lifecycle: "cancelled" });
+		}
+
+		// Exposed so the extension can clear the timer on abnormal exits
+		// (e.g. session shutdown, parent process kill). Safe to call multiple times.
+		function dispose() {
+			if (durationTimer !== null) {
+				clearInterval(durationTimer);
+				durationTimer = null;
+			}
+			clearTerminalTitle();
 		}
 
 		// --- option selection ----------------------------------------------
@@ -512,7 +576,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (matchesKey(data, Key.up)) {
 				if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 					const opts = getRenderOptions(q);
-					optionIndex = (optionIndex - 1 + opts.length) % opts.length;
+					// +1 for the [Select] button on multi_select
+					const totalLen = opts.length + (q.type === "select_many" ? 1 : 0);
+					optionIndex = (optionIndex - 1 + totalLen) % totalLen;
 				}
 				refresh();
 				return;
@@ -520,7 +586,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (matchesKey(data, Key.down)) {
 				if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 					const opts = getRenderOptions(q);
-					optionIndex = (optionIndex + 1) % opts.length;
+					const totalLen = opts.length + (q.type === "select_many" ? 1 : 0);
+					optionIndex = (optionIndex + 1) % totalLen;
 				}
 				refresh();
 				return;
@@ -537,8 +604,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (q.type === "select_one" || q.type === "confirm_enum") {
 					selectOption(optionIndex, q);
 				} else if (q.type === "select_many") {
-					// Enter on multi_select commits the full array
-					commitMultiSelect(q);
+					// Check if [Select] button is highlighted (index = options.length)
+					const opts = getRenderOptions(q);
+					if (optionIndex === opts.length) {
+						commitMultiSelect(q);
+					} else {
+						// Otherwise toggle the current option (like Space)
+						toggleOption(optionIndex, q);
+					}
 				} else if (q.type === "number") {
 					inputMode = "number";
 					inputQuestionId = q.id;
@@ -556,7 +629,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// 1-9: toggle option on multi_select, select on select_one/confirm_enum
 			if (q.type === "select_one" || q.type === "select_many" || q.type === "confirm_enum") {
 				const opts = getRenderOptions(q);
-				const numericMax = opts.length - 1; // last index = "Other"
+				// Clamp to Other's index (exclude [Select] from numeric keys)
+				const numericMax = opts.length - 1;
 				if (data >= "1" && data <= "9") {
 					const n = Number(data) - 1;
 					if (n <= numericMax) {
@@ -692,9 +766,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						addWrappedWithPrefix(lines, "     ", theme.fg("accent", `→ ${otherText}`), width);
 					}
 				}
+				// [Select] button for multi_select (commits the array)
+				if (q.type === "select_many") {
+					lines.push("");
+					const isSelect = optionIndex === opts.length;
+					const arrow = isSelect ? theme.fg("accent", "▶ ") : "  ";
+					const selectText = `${arrow}[Select]  ${theme.fg("muted", "(submit selected)")}`;
+					lines.push(theme.fg(isSelect ? "accent" : "text", selectText));
+				}
 				lines.push("");
 				if (q.type === "select_many") {
-					lines.push(theme.fg("muted", "↑/↓ navigate  Space toggle  Enter next  Tab notes  e preview  ? help"));
+					lines.push(theme.fg("muted", "↑/↓ navigate  Space/Enter toggle  Enter on [Select] to commit  Tab notes  e preview  ? help"));
 				} else {
 					lines.push(theme.fg("muted", "↑/↓ navigate  Enter select  1-9 quick  Tab notes  e preview  o browser  ? help"));
 				}
@@ -729,11 +811,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
 			}
 
-			// Status line: notes indicator + browser URL
+			// Status line: duration timer + notes indicator + browser URL
 			const note = notes[q.id];
 			const noteIndicator = note ? theme.fg("accent", " 📝") : "";
+			const elapsed = formatElapsed(Date.now() - askedAt);
+			lines.push("");
+			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
 			if (browserUrl) {
-				lines.push("");
 				lines.push(theme.fg("muted", `🌐 ${browserUrl} (press o to open)`));
 			}
 			if (noteIndicator) {
@@ -754,6 +838,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// Exposed for slice 5+ to wire up
 			setBrowserUrl,
 			getBrowserOpenAttempt,
+			// Clear the duration timer (called on done or session shutdown)
+			dispose,
 		};
 	};
 }

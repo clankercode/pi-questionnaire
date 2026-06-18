@@ -6,7 +6,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuestionnaireComponent } from "../src/tui.ts";
+import {
+	buildQuestionnaireComponent,
+	clearTerminalTitle,
+	setTerminalTitle,
+} from "../src/tui.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
 
 import { runHarness as _runHarness } from "./harness-runner.mjs";
@@ -69,7 +73,7 @@ test("select_one renders question + numbered options", () => {
 	assert.match(joined, /3\. Other/);
 });
 
-test("select_many shows checkboxes", () => {
+test("select_many shows checkboxes + [Select] button + Space/Enter hint", () => {
 	const { lines } = render([{
 		header: "Toppings",
 		question: "Pick toppings?",
@@ -78,8 +82,11 @@ test("select_many shows checkboxes", () => {
 	}]);
 	const joined = lines.join("\n");
 	assert.match(joined, /Pick toppings\?/);
-	// Multi-select hint
-	assert.match(joined, /Space toggle/);
+	// Multi-select hint now includes both Space and Enter
+	assert.match(joined, /Space\/Enter toggle/);
+	// [Select] button appears below the options
+	assert.match(joined, /\[Select\]/);
+	assert.match(joined, /submit selected/);
 });
 
 test("confirm_enum auto-fills Affirm/Decline + Other", () => {
@@ -289,33 +296,125 @@ test("normalize caps user options at 7 so post-Other is 8", () => {
 	assert.equal(r.value[0].options.length, 8, "capped at 8 (7 + Other)");
 });
 
-test("multi_select single-question: Space toggles without submitting", () => {
-	// Regression: previously Space on a single-question multi_select
-	// immediately submitted with just the one option. The correct UX is
-	// Space=toggle, Enter=submit.
+// ---- Bell + duration timer ------------------------------------------------
+
+test("setTerminalTitle writes OSC 0 sequence with given title", () => {
+	const writes = [];
+	const writer = (s) => writes.push(s);
+	setTerminalTitle("hello", writer);
+	assert.equal(writes.length, 1);
+	assert.equal(writes[0], "\x1b]0;hello\x07");
+});
+
+test("clearTerminalTitle writes OSC 0 sequence with empty title", () => {
+	const writes = [];
+	const writer = (s) => writes.push(s);
+	clearTerminalTitle(writer);
+	assert.equal(writes.length, 1);
+	assert.equal(writes[0], "\x1b]0;\x07");
+});
+
+test("TUI mount sets title with bell prefix; submit clears it", () => {
+	const writes = [];
+	const origWrite = process.stdout.write.bind(process.stdout);
+	process.stdout.write = ((s) => {
+		if (typeof s === "string") writes.push(s);
+		return true;
+	});
+	try {
+		const canonical = normalizeQuestions([{
+			header: "Pick", question: "Pick one?", type: "select_one",
+			options: [{ label: "A" }, { label: "B" }],
+		}]);
+		const factory = buildQuestionnaireComponent({ questions: canonical });
+		factory(makeFakeTui(), fakeTheme, {}, () => {});
+		const setCalls = writes.filter((w) => w.startsWith("\x1b]0;"));
+		assert.ok(setCalls.length >= 1, "expected at least one title-set on mount");
+		assert.match(setCalls[0], /\x1b\]0;🔔 AskUserQuestion — Pick\x07/);
+	} finally {
+		process.stdout.write = origWrite;
+	}
+});
+
+test("duration timer appears in status line; updates on re-render", async () => {
+	const canonical = normalizeQuestions([{
+		header: "h", question: "q?", type: "free_text",
+	}]);
+	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const tui = makeFakeTui();
+	const c = factory(tui, fakeTheme, {}, () => {});
+	const t0 = Date.now();
+	let lines = c.render(80).join("\n");
+	assert.match(lines, /⏱\s+\d+s elapsed/);
+	await new Promise((r) => setTimeout(r, 1100));
+	lines = c.render(80).join("\n");
+	const m = lines.match(/⏱\s+(\d+)s elapsed/);
+	assert.ok(m, "elapsed should still be present");
+	const secs = Number(m[1]);
+	assert.ok(secs >= 1 && secs < 30, `expected elapsed >= 1, got ${secs} (waited ${Date.now() - t0}ms)`);
+	c.dispose();
+});
+
+test("dispose() prevents further timer callbacks; safe to call multiple times", () => {
+	const canonical = normalizeQuestions([{
+		header: "h", question: "q?", type: "free_text",
+	}]);
+	const factory = buildQuestionnaireComponent({ questions: canonical });
+	const c = factory(makeFakeTui(), fakeTheme, {}, () => {});
+	c.dispose();
+	c.dispose(); // no throw
+});
+
+test("multi_select single-question: Space toggles, [Select] commits", () => {
+	// Indices: 0=A, 1=B, 2=C, 3=Other (auto-appended), 4=[Select]
 	const { component, getDone } = drive([{
 		header: "ms",
 		question: "Pick toppings?",
 		type: "select_many",
 		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
 	}]);
-	component.handleInput(" "); // toggle A — should NOT submit
-	assert.equal(getDone(), null, "Space should not submit on multi_select");
-	component.handleInput("\u001b[B"); // down to B
+	component.handleInput(" "); // toggle A (index 0)
+	assert.equal(getDone(), null, "Space should not submit");
+	component.handleInput("\u001b[B"); // down to B (1)
 	component.handleInput(" "); // toggle B
 	assert.equal(getDone(), null, "Space should still not submit");
-	component.handleInput("\u001b[B"); // down to C
-	component.handleInput(" "); // toggle C
-	assert.equal(getDone(), null, "Space should still not submit");
-	// Now Enter to commit
-	component.handleInput("\r");
+	// Navigate past C, Other, to [Select] (index 4)
+	component.handleInput("\u001b[B"); // C (2)
+	component.handleInput("\u001b[B"); // Other (3)
+	component.handleInput("\u001b[B"); // [Select] (4)
+	component.handleInput("\r"); // commit
 	const v = getDone();
-	assert.ok(v !== null, "Enter should submit");
+	assert.ok(v !== null, "Enter on [Select] should submit");
 	if (v) {
 		assert.equal(v.lifecycle, "answered");
 		const a = v.answers[0];
 		const labels = a.value.map((x) => x.value).sort();
-		assert.deepEqual(labels, ["A", "B", "C"]);
+		assert.deepEqual(labels, ["A", "B"]);
+	}
+});
+
+test("multi_select single-question: Enter on a regular option toggles (not submits)", () => {
+	const { component, getDone } = drive([{
+		header: "ms",
+		question: "Pick toppings?",
+		type: "select_many",
+		options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+	}]);
+	component.handleInput("\r"); // toggle A
+	assert.equal(getDone(), null, "Enter on an option should toggle, not submit");
+	component.handleInput("\u001b[B"); // B
+	component.handleInput("\r"); // toggle B
+	assert.equal(getDone(), null, "Enter on an option should still not submit");
+	// Navigate to [Select]
+	component.handleInput("\u001b[B"); // C
+	component.handleInput("\u001b[B"); // Other
+	component.handleInput("\u001b[B"); // [Select]
+	component.handleInput("\r"); // commit
+	const v = getDone();
+	assert.ok(v !== null, "Enter on [Select] should submit");
+	if (v) {
+		const labels = v.answers[0].value.map((x) => x.value).sort();
+		assert.deepEqual(labels, ["A", "B"]);
 	}
 });
 
@@ -329,6 +428,11 @@ test("multi_select single-question: 1-9 toggles without submitting", () => {
 	component.handleInput("1"); // toggle A
 	component.handleInput("2"); // toggle B
 	assert.equal(getDone(), null, "1-9 should not submit on multi_select");
+	// Navigate to [Select] (index 4) from index 0
+	component.handleInput("\u001b[B"); // 1
+	component.handleInput("\u001b[B"); // 2
+	component.handleInput("\u001b[B"); // 3
+	component.handleInput("\u001b[B"); // 4 ([Select])
 	component.handleInput("\r"); // commit
 	const v = getDone();
 	assert.ok(v !== null);
