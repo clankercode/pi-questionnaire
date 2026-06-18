@@ -26,7 +26,7 @@ export interface BrowserSyncServerOptions {
 	onClearAnswer?: (questionId: string) => void;
 	onTab?: (currentTab: number) => void;
 	onOptions?: (options: BrowserOptionsState) => void;
-	onSubmit?: () => void;
+	onSubmit?: () => boolean | void;
 	onCancel?: () => void;
 	log?: (line: string) => void;
 }
@@ -51,7 +51,7 @@ export interface BrowserSyncServerHandle {
 type BrowserLifecycle = "open" | "submitted" | "cancelled";
 
 type BrowserServerMessage =
-	| { type: "state"; questions: CanonicalQuestion[]; currentTab: number; answers: AnswerMap; options: BrowserOptionsState }
+	| { type: "state"; questions: CanonicalQuestion[]; currentTab: number; answers: AnswerMap; options: BrowserOptionsState; lifecycle: BrowserLifecycle }
 	| { type: "tab"; currentTab: number }
 	| { type: "answers"; answers: AnswerMap }
 	| { type: "options"; options: BrowserOptionsState }
@@ -363,11 +363,13 @@ function handleClientMessage(state: BrowserSyncServerInternal, client: WsClient,
 		case "options":
 			handleBrowserOptions(state, message);
 			break;
-		case "submit":
+		case "submit": {
+			const accepted = state.callbacks.onSubmit?.();
+			if (accepted === false) break;
 			state.lifecycle = "submitted";
-			state.callbacks.onSubmit?.();
 			broadcast(state, { type: "lifecycle", lifecycle: state.lifecycle });
 			break;
+		}
 		case "cancel":
 			state.lifecycle = "cancelled";
 			state.callbacks.onCancel?.();
@@ -453,6 +455,7 @@ function stateMessage(state: BrowserSyncServerInternal): BrowserServerMessage {
 		currentTab: state.currentTab,
 		answers: state.answers,
 		options: state.options,
+		lifecycle: state.lifecycle,
 	};
 }
 
@@ -490,6 +493,10 @@ function encodeServerFrame(payload: Buffer, opcode: number): Buffer {
 async function stopInternal(state: BrowserSyncServerInternal): Promise<void> {
 	if (state.stopped) return;
 	state.stopped = true;
+	if (state.lifecycle === "open") {
+		state.lifecycle = "cancelled";
+		broadcast(state, { type: "lifecycle", lifecycle: state.lifecycle });
+	}
 	for (const client of state.clients) {
 		try {
 			client.socket.end(encodeServerFrame(Buffer.alloc(0), 0x8));
@@ -514,6 +521,7 @@ function renderBrowserPage(state: BrowserSyncServerInternal): string {
 		currentTab: state.currentTab,
 		answers: state.answers,
 		options: state.options,
+		lifecycle: state.lifecycle,
 		renderOptions: Object.fromEntries(
 			state.questions.map((question, index) => [String(index), getRenderOptions(question)]),
 		),
@@ -537,13 +545,13 @@ body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0
 <div id="overlay" class="overlay">Waiting for TUI...</div>
 <script>
 const BOOT = ${safeJson(boot)};
-let state = { questions: BOOT.questions, currentTab: BOOT.currentTab, answers: BOOT.answers || {}, options: BOOT.options || {notes:{}}, renderOptions: BOOT.renderOptions };
+let state = { questions: BOOT.questions, currentTab: BOOT.currentTab, answers: BOOT.answers || {}, options: BOOT.options || {notes:{}}, lifecycle: BOOT.lifecycle || 'open', renderOptions: BOOT.renderOptions };
 let socket;
 let expanded = new Set();
 let sendTimer;
 let reconnectTimer;
 let reconnectDelay = 500;
-let terminalLifecycle = false;
+let terminalLifecycle = state.lifecycle !== 'open';
 function connect(){
   if(terminalLifecycle) return;
   clearTimeout(reconnectTimer);
@@ -552,7 +560,7 @@ function connect(){
   socket.onclose = () => { if(terminalLifecycle) return; document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if(message.type === 'state') state = {...state, ...message};
+    if(message.type === 'state') { state = {...state, ...message}; if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true; }
     if(message.type === 'tab') state.currentTab = message.currentTab;
     if(message.type === 'answers') state.answers = message.answers || {};
     if(message.type === 'options') state.options = message.options || {notes:{}};
@@ -589,7 +597,7 @@ function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); rend
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function render(){
   const root = document.getElementById('questions'); root.innerHTML = '';
-  document.getElementById('overlay').classList.toggle('visible', state.currentTab === state.questions.length);
+  document.getElementById('overlay').classList.toggle('visible', terminalLifecycle);
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';

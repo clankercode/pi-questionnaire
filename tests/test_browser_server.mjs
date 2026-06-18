@@ -104,8 +104,8 @@ async function connectWs(handle) {
 		frameBuffer = Buffer.concat([frameBuffer, chunk]);
 		drain();
 	});
-	async function nextMessage(type) {
-		const deadline = Date.now() + 1000;
+	async function nextMessage(type, timeoutMs = 1000) {
+		const deadline = Date.now() + timeoutMs;
 		while (Date.now() < deadline) {
 			const idx = messages.findIndex((message) => type === undefined || message.type === type);
 			if (idx !== -1) return messages.splice(idx, 1)[0];
@@ -156,6 +156,7 @@ test("browser websocket sends initial state and replies to ping", async () => {
 		assert.equal(state.questions.length, 2);
 		assert.deepEqual(state.answers, {});
 		assert.deepEqual(state.options.notes, {});
+		assert.equal(state.lifecycle, "open");
 
 		client.send({ type: "ping" });
 		assert.deepEqual(await client.nextMessage("pong"), { type: "pong" });
@@ -211,6 +212,10 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
 		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
 		assert.match(page.text, /if\(terminalLifecycle\) return/);
+		assert.match(page.text, /classList\.toggle\('visible', terminalLifecycle\)/);
+		assert.match(page.text, /let terminalLifecycle = state\.lifecycle !== 'open'/);
+		assert.match(page.text, /if\(message\.lifecycle && message\.lifecycle !== 'open'\) terminalLifecycle = true/);
+		assert.doesNotMatch(page.text, /classList\.toggle\('visible', state\.currentTab === state\.questions\.length\)/);
 		assert.match(page.text, /function renderPreview/);
 		assert.match(page.text, /function renderMarkdown/);
 		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
@@ -235,6 +240,73 @@ test("reconnected websocket receives latest full state snapshot", async () => {
 	} finally {
 		first?.close();
 		second?.close();
+		await handle.stop();
+	}
+});
+
+test("browser submit rejection keeps lifecycle open and syncs review tab", async () => {
+	const events = [];
+	let acceptsSubmit = false;
+	let handle;
+	handle = await startBrowserSyncServer({
+		questions: QUESTIONS,
+		preferredPort: 0,
+		onSubmit: () => {
+			events.push({ type: "submit" });
+			if (!acceptsSubmit) {
+				handle.updateFromTui({ currentTab: QUESTIONS.length });
+				return false;
+			}
+			return true;
+		},
+	});
+	let client;
+	try {
+		client = await connectWs(handle);
+		await client.nextMessage("state");
+
+		client.send({ type: "submit" });
+		assert.deepEqual(await client.nextMessage("tab"), { type: "tab", currentTab: QUESTIONS.length });
+		await assert.rejects(
+			() => client.nextMessage("lifecycle", 60),
+			/timed out waiting for websocket message lifecycle/,
+		);
+
+		acceptsSubmit = true;
+		client.send({ type: "submit" });
+		assert.deepEqual(await client.nextMessage("lifecycle"), { type: "lifecycle", lifecycle: "submitted" });
+		assert.deepEqual(events, [{ type: "submit" }, { type: "submit" }]);
+	} finally {
+		client?.close();
+		await handle.stop();
+	}
+});
+
+test("late websocket join receives terminal lifecycle in state snapshot", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	let client;
+	try {
+		handle.updateFromTui({ lifecycle: "submitted" });
+		client = await connectWs(handle);
+		const state = await client.nextMessage("state");
+		assert.equal(state.lifecycle, "submitted");
+	} finally {
+		client?.close();
+		await handle.stop();
+	}
+});
+
+test("stopping an open browser server broadcasts cancelled lifecycle", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	let client;
+	try {
+		client = await connectWs(handle);
+		await client.nextMessage("state");
+		const stopped = handle.stop();
+		assert.deepEqual(await client.nextMessage("lifecycle"), { type: "lifecycle", lifecycle: "cancelled" });
+		await stopped;
+	} finally {
+		client?.close();
 		await handle.stop();
 	}
 });
