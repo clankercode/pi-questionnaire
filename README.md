@@ -4,6 +4,14 @@ Claude Code-compatible `AskUserQuestion` tool for the [pi](https://github.com/ea
 
 Replaces v1's `ask_user` with the same shape Claude Code uses — five question types, per-question notes, persistent checkmarks, rich previews, a typed-confirmation "danger" flow for destructive actions, and per-setting side effects (BEL, desktop notification, TTS, custom command, idle heartbeat, browser-intent log) wired through a 13-field settings module.
 
+## Screenshots
+
+![Screenshot 1](./docs/screenshots/screenshot-1.png)
+*Caption for screenshot 1*
+
+![Screenshot 2](./docs/screenshots/screenshot-2.png)
+*Caption for screenshot 2*
+
 ## What it is
 
 A single tool, registered as `AskUserQuestion`, that:
