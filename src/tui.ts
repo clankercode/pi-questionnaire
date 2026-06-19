@@ -690,7 +690,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				saveAnswer(q, { mode: "other", text: trimmed });
 			} else if (inputMode === "free_text") {
-				saveAnswer(q, value);
+				saveAnswer(q, editor.getText());
 			} else if (inputMode === "danger") {
 				// Gate: empty / whitespace-only must NOT commit. Stay in
 				// danger mode (don't reset inputMode, don't advance) so the
@@ -875,6 +875,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// In notes mode, Enter saves and returns to the answer view.
 				if (inputMode === "notes" && matchesKey(data, Key.enter)) {
 					closeNotes();
+					return;
+				}
+				if (inputMode === "free_text" && matchesKey(data, Key.enter)) {
+					const q = inputQuestionId ? questions.find((question) => question.id === inputQuestionId) : undefined;
+					if (!q) return;
+					saveAnswer(q, editor.getText());
+					inputMode = null;
+					inputQuestionId = null;
+					editor.setText("");
+					commitAndAdvance();
 					return;
 				}
 				if (!otherHandled) {
@@ -1130,6 +1140,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			const q = questions.find((question) => question.id === questionId);
 			if (!q) return;
 			saveAnswer(q, value, false);
+			if (inputQuestionId === q.id) {
+				if ((inputMode === "free_text" || inputMode === "danger") && typeof value === "string") {
+					editor.setText(value);
+				} else if (inputMode === "number" && typeof value === "number") {
+					editor.setText(String(value));
+				} else if (inputMode === "other") {
+					editor.setText(getOtherText(q, value));
+				}
+			}
 			scheduleBrowserRefresh();
 		}
 
@@ -1145,6 +1164,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				for (const [key, value] of Object.entries(options.notes)) {
 					const q = questions.find((question) => question.id === key) ?? questions[Number(key)];
 					if (q && value.trim() !== "") notes[q.id] = value;
+				}
+				if (inputMode === "notes" && inputQuestionId) {
+					editor.setText(notes[inputQuestionId] ?? "");
 				}
 			}
 			scheduleBrowserRefresh();

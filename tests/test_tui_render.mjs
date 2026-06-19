@@ -839,6 +839,59 @@ test("browser-origin notes are included in submitted TUI result", () => {
 	assert.deepEqual(doneValue.notes, { b: "  browser note  " });
 });
 
+test("browser-origin free_text updates active editor and TUI submit preserves spaces", () => {
+	const questions = normalizeQuestions([
+		{ id: "b", header: "b", question: "B?", type: "free_text" },
+	]);
+	let doneValue = null;
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(
+		makeFakeTui(),
+		fakeTheme,
+		{},
+		(v) => { doneValue = v; },
+	);
+
+	component.render(80);
+	component.applyBrowserAnswer("b", "  keep   every space  ");
+	assert.equal(component.getEditorText(), "  keep   every space  ");
+
+	component.handleInput("\r");
+	assert.equal(doneValue.lifecycle, "answered");
+	assert.equal(doneValue.answers.find((answer) => answer.id === "b")?.value, "  keep   every space  ");
+});
+
+test("browser-origin notes update active notes editor and TUI submit preserves notes", () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },
+	]);
+	let doneValue = null;
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(
+		makeFakeTui(),
+		fakeTheme,
+		{},
+		(v) => { doneValue = v; },
+	);
+
+	component.handleInput("\t");
+	component.applyBrowserOptions({ notes: { a: "  keep   browser note  " } });
+	assert.equal(component.getEditorText(), "  keep   browser note  ");
+
+	component.handleInput("\r");
+	component.handleInput("\r");
+	assert.equal(doneValue.lifecycle, "answered");
+	assert.deepEqual(doneValue.notes, { a: "  keep   browser note  " });
+});
+
 test("browser-origin submit is blocked until every question is answered", async () => {
 	const questions = normalizeQuestions([
 		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },

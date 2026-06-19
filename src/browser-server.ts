@@ -595,7 +595,7 @@ function applyServerMessage(message){
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
     if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
     if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true;
-    applyLifecycle(message.lifecycle);
+    if(applyLifecycle(message.lifecycle)) dom.needsRender = true;
     return dom;
   }
   if(message.type === 'tab' && state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
@@ -607,7 +607,9 @@ function applyServerMessage(message){
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
     if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
   }
-  if(message.type === 'lifecycle' && message.lifecycle !== 'open') applyLifecycle(message.lifecycle);
+  if(message.type === 'lifecycle' && message.lifecycle !== 'open'){
+    if(applyLifecycle(message.lifecycle)) dom.needsRender = true;
+  }
   return dom;
 }
 function setOverlayPending(pending, text){
@@ -687,10 +689,15 @@ function restoreFocus(focus){
   el.focus({preventScroll:true});
   if(typeof focus.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(focus.start, focus.end);
 }
+function terminalText(){ return state.lifecycle === 'submitted' ? 'Questionnaire submitted.' : 'Questionnaire cancelled.'; }
 function render(){
   const focus = captureFocus();
-  const root = document.getElementById('questions'); root.innerHTML = '';
+  const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
   updateLifecycleOverlay();
+  if(terminalLifecycle || state.lifecycle !== 'open'){
+    root.textContent = terminalText();
+    return;
+  }
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';

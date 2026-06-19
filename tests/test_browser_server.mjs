@@ -482,6 +482,8 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 		assert.doesNotMatch(overlay.className, /visible/);
 		assert.equal(document.getElementById("status").textContent, "Submitted");
+		assert.equal(document.getElementById("questions").children.length, 0);
+		assert.match(document.getElementById("questions").textContent, /Questionnaire submitted/);
 	} finally {
 		await handle.stop();
 	}
