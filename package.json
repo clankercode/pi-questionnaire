@@ -10,12 +10,12 @@
   "author": "XertroV",
   "repository": {
     "type": "git",
-    "url": "https://github.com/clanker-code/pi-questionnaire.git"
+    "url": "https://github.com/clankercode/pi-questionnaire.git"
   },
   "bugs": {
-    "url": "https://github.com/clanker-code/pi-questionnaire/issues"
+    "url": "https://github.com/clankercode/pi-questionnaire/issues"
   },
-  "homepage": "https://github.com/clanker-code/pi-questionnaire#readme",
+  "homepage": "https://github.com/clankercode/pi-questionnaire#readme",
   "keywords": [
     "pi",
     "pi-extension",
