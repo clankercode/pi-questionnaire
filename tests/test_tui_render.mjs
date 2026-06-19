@@ -163,6 +163,38 @@ test("number question shows range", () => {
 	assert.match(joined, /Range: 1 … 10/);
 });
 
+test("number Up/Down nudges visible draft and clamps to range", () => {
+	const { component } = drive([{
+		id: "qty",
+		header: "Qty",
+		question: "How many?",
+		type: "number",
+		min: 2,
+		max: 4,
+	}]);
+
+	component.handleInput("\u001b[A");
+	assert.equal(component.getEditorText(), "2", "empty Up should start at min");
+	let joined = component.render(80).join("\n");
+	assert.match(joined, /Answer: 2/, "nudged draft should render immediately");
+
+	component.handleInput("\u001b[A");
+	component.handleInput("\u001b[A");
+	component.handleInput("\u001b[A");
+	assert.equal(component.getEditorText(), "4", "Up should clamp at max");
+	joined = component.render(80).join("\n");
+	assert.match(joined, /Answer: 4/);
+
+	component.setEditorText("");
+	component.handleInput("\u001b[B");
+	assert.equal(component.getEditorText(), "4", "empty Down should start at max");
+
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	assert.equal(component.getEditorText(), "2", "Down should clamp at min");
+});
+
 test("free_text opens editor immediately on render", () => {
 	const { lines } = render([{
 		header: "Note",
@@ -575,6 +607,139 @@ test("Tab swaps to notes view; Esc returns to answer view", () => {
 	assert.equal(v.lifecycle, "cancelled");
 });
 
+test("Tab opens notes from active free_text editor and preserves draft answer", () => {
+	const { component } = drive([{
+		id: "text",
+		header: "Text",
+		question: "Describe it?",
+		type: "free_text",
+	}]);
+	for (const ch of "draft answer") component.handleInput(ch);
+
+	component.handleInput("\t");
+
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Notes for "Text"/);
+	assert.equal(component.getBrowserState().answers["0"], "draft answer");
+});
+
+test("Tab opens notes from active number editor and preserves numeric draft", () => {
+	const { component } = drive([{
+		id: "qty",
+		header: "Qty",
+		question: "How many?",
+		type: "number",
+		min: 0,
+		max: 10,
+	}]);
+	component.handleInput("7");
+
+	component.handleInput("\t");
+
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Notes for "Qty"/);
+	assert.equal(component.getBrowserState().answers["0"], 7);
+});
+
+test("number draft reopens after visiting notes", () => {
+	const { component } = drive([{
+		id: "qty",
+		header: "Qty",
+		question: "How many?",
+		type: "number",
+		min: 0,
+		max: 10,
+	}]);
+	component.handleInput("7");
+	component.handleInput("\t");
+	component.handleInput("\u001b");
+
+	assert.equal(component.getEditorText(), "7");
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Answer: 7/);
+});
+
+test("out-of-range number draft reopens after visiting notes without committing answer", () => {
+	const { component } = drive([{
+		id: "qty",
+		header: "Qty",
+		question: "How many?",
+		type: "number",
+		min: 0,
+		max: 10,
+	}]);
+	component.handleInput("1");
+	component.handleInput("1");
+	component.handleInput("\t");
+	component.handleInput("\u001b");
+
+	assert.deepEqual(component.getBrowserState().answers, {});
+	assert.equal(component.getEditorText(), "11");
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Answer: 11/);
+});
+
+test("Tab opens notes from active Other editor and preserves custom draft", () => {
+	const { component } = drive([{
+		id: "pick",
+		header: "Pick",
+		question: "Pick one?",
+		type: "select_one",
+		options: [{ label: "A" }],
+	}]);
+	component.handleInput("\u001b[B"); // Other
+	for (const ch of "custom") component.handleInput(ch);
+
+	component.handleInput("\t");
+
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Notes for "Pick"/);
+	assert.deepEqual(component.getBrowserState().answers["0"], { mode: "other", text: "custom" });
+});
+
+test("Other draft editor reopens after visiting notes", () => {
+	const { component } = drive([{
+		id: "pick",
+		header: "Pick",
+		question: "Pick one?",
+		type: "select_one",
+		options: [{ label: "A" }],
+	}]);
+	component.handleInput("\u001b[B"); // Other
+	for (const ch of "custom") component.handleInput(ch);
+	component.handleInput("\t");
+	component.handleInput("\u001b");
+
+	assert.equal(component.getEditorText(), "custom");
+	const lines = component.render(80).join("\n");
+	assert.match(lines, /Other: custom/);
+});
+
+test("Tab opens notes from danger editor and preserves confirmation draft", () => {
+	setInMemorySettings({ dangerCheckEnabled: true });
+	try {
+		const { component } = drive([{
+			id: "danger",
+			header: "Delete",
+			question: "Delete production?",
+			type: "free_text",
+			is_dangerous: true,
+		}]);
+		for (const ch of "production-db") component.handleInput(ch);
+
+		component.handleInput("\t");
+
+		let lines = component.render(80).join("\n");
+		assert.match(lines, /Notes for "Delete"/);
+		component.handleInput("\u001b");
+		assert.equal(component.getEditorText(), "production-db");
+		lines = component.render(80).join("\n");
+		assert.match(lines, /production-db/);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
 test("notes typing is visible while editing", () => {
 	const { component } = drive([{
 		header: "h", question: "q?", type: "select_one",
@@ -890,6 +1055,69 @@ test("browser-origin notes update active notes editor and TUI submit preserves n
 	component.handleInput("\r");
 	assert.equal(doneValue.lifecycle, "answered");
 	assert.deepEqual(doneValue.notes, { a: "  keep   browser note  " });
+});
+
+test("browser-origin number answer replaces stale local draft after notes", () => {
+	const questions = normalizeQuestions([
+		{ id: "qty", header: "Qty", question: "How many?", type: "number", min: 0, max: 10 },
+	]);
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(makeFakeTui(), fakeTheme, {}, () => {});
+
+	component.handleInput("7");
+	component.handleInput("\t");
+	component.applyBrowserAnswer("qty", 3);
+	component.handleInput("\u001b");
+
+	assert.equal(component.getEditorText(), "3");
+	assert.equal(component.getBrowserState().answers["0"], 3);
+});
+
+test("browser-origin clear answer drops stale local draft after notes", () => {
+	const questions = normalizeQuestions([
+		{ id: "text", header: "Text", question: "Describe?", type: "free_text" },
+	]);
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(makeFakeTui(), fakeTheme, {}, () => {});
+
+	for (const ch of "draft") component.handleInput(ch);
+	component.handleInput("\t");
+	component.applyBrowserClearAnswer("text");
+	component.handleInput("\u001b");
+
+	assert.equal(component.getEditorText(), "");
+	assert.deepEqual(component.getBrowserState().answers, {});
+});
+
+test("local save drops stale draft from before notes", () => {
+	const questions = normalizeQuestions([
+		{ id: "text", header: "Text", question: "Describe?", type: "free_text" },
+		{ id: "next", header: "Next", question: "Next?", type: "free_text" },
+	]);
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(makeFakeTui(), fakeTheme, {}, () => {});
+
+	for (const ch of "draft") component.handleInput(ch);
+	component.handleInput("\t");
+	component.handleInput("\u001b");
+	component.setEditorText("final");
+	component.handleInput("\r");
+	component.handleInput("[");
+
+	assert.equal(component.getBrowserState().answers["0"], "final");
+	assert.equal(component.getEditorText(), "final");
 });
 
 test("browser-origin submit is blocked until every question is answered", async () => {

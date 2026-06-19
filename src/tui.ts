@@ -72,6 +72,7 @@ export interface BrowserTuiStatePatch {
 
 const SUBMIT_TAB = "__submit__";
 type ViewMode = "answer" | "notes" | "help";
+type InputMode = "text" | "number" | "other" | "free_text" | "notes" | "danger" | null;
 
 // ---- Render helpers -------------------------------------------------------
 
@@ -292,10 +293,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		const checked: Record<string, Set<number>> = {};
 		const expandedPreview: Record<string, number | null> = {}; // q.id -> option index
 		const notes: Record<string, string> = {};
+		const answerDrafts: Record<string, string> = {};
 		const answers = new Map<string, TuiAnswer>();
 		let viewMode: ViewMode = "answer";
-		let inputMode: "text" | "number" | "other" | "free_text" | "notes" | "danger" | null = null;
+		let inputMode: InputMode = null;
 		let inputQuestionId: string | null = null;
+		let notesReturnMode: Exclude<InputMode, "notes" | null> | null = null;
+		let notesReturnQuestionId: string | null = null;
 		let browserUrl: string | null = null;
 		let lastBrowserOpenAttempt: { url: string; at: number } | null = null;
 		let browserOpenHandler: ((url: string) => void) | null = null;
@@ -370,6 +374,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		// right mode without every call-site having to remember to do it.
 		// Idempotent: if state already matches, no changes are made.
 		function reconcileMode() {
+			if (viewMode === "notes") return;
 			const q = currentQuestion();
 			if (!q) {
 				// On Submit tab or invalid: drop out of any editor mode
@@ -390,7 +395,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// free_text answer value is a string, not a discriminated
 					// union, so the value comes through as-is).
 					const prev = answers.get(q.id)?.value;
-					editor.setText(typeof prev === "string" ? prev : "");
+					editor.setText(answerDrafts[q.id] ?? (typeof prev === "string" ? prev : ""));
 				}
 				return;
 			}
@@ -407,9 +412,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// visible hint the user can edit or clear. If neither
 					// is set, leave the editor empty.
 					const prev = answers.get(q.id)?.value;
-					const initial = typeof prev === "string" && prev.length > 0
+					const initial = answerDrafts[q.id] ?? (typeof prev === "string" && prev.length > 0
 						? prev
-						: (typeof q.placeholder === "string" ? q.placeholder : "");
+						: (typeof q.placeholder === "string" ? q.placeholder : ""));
 					editor.setText(initial);
 				}
 				return;
@@ -419,8 +424,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					inputMode = "number";
 					inputQuestionId = q.id;
 					const prev = answers.get(q.id)?.value;
-					editor.setText(typeof prev === "string" ? prev : "");
+					editor.setText(answerDrafts[q.id] ?? (typeof prev === "number" ? String(prev) : typeof prev === "string" ? prev : ""));
 				}
+				return;
+			}
+			if (notesReturnMode === "other" && notesReturnQuestionId === q.id) {
+				openOtherEditorFor(q);
+				notesReturnMode = null;
+				notesReturnQuestionId = null;
 				return;
 			}
 			// Non-text-input question (select_one/select_many/confirm_enum):
@@ -452,6 +463,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 
 		function saveAnswer(q: CanonicalQuestion, value: AnswerValue, notifyBrowser = true) {
 			const idx = questions.findIndex((x) => x.id === q.id);
+			delete answerDrafts[q.id];
 			answers.set(q.id, { id: q.id, index: idx, type: q.type, value });
 			syncCheckedFromAnswer(q, value);
 			if (notifyBrowser) opts.onBrowserStateChange?.({ answers: getBrowserState().answers });
@@ -631,7 +643,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (inputMode === "other" && inputQuestionId === q.id) return;
 			inputMode = "other";
 			inputQuestionId = q.id;
-			const prev = getOtherText(q, answers.get(q.id)?.value);
+			const prev = answerDrafts[q.id] ?? getOtherText(q, answers.get(q.id)?.value);
 			editor.setText(prev);
 			refresh();
 		}
@@ -736,11 +748,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			viewMode = "answer";
 			editor.setText("");
 			if (closeOpts.advanceTab === true && isMulti) {
+				notesReturnMode = null;
+				notesReturnQuestionId = null;
 				currentTab = Math.min(questions.length, currentTab + 1);
 				optionIndex = 0;
 			opts.onBrowserStateChange?.({ currentTab });
-				reconcileMode();
 			}
+			reconcileMode();
 			opts.onBrowserStateChange?.({ notes: { ...notes } });
 			refresh();
 		}
@@ -750,6 +764,75 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			if (!q) return;
 			if (viewMode === "notes") closeNotes();
 			else openNotes(q);
+		}
+
+		function clampNumberDraft(value: number, q: CanonicalQuestion): number {
+			let next = value;
+			if (q.min !== undefined && next < q.min) next = q.min;
+			if (q.max !== undefined && next > q.max) next = q.max;
+			return next;
+		}
+
+		function nudgeNumberDraft(q: CanonicalQuestion, delta: 1 | -1) {
+			const raw = editor.getText().trim();
+			const parsed = Number(raw);
+			const next = raw === "" || !Number.isFinite(parsed)
+				? (delta > 0 ? q.min ?? 0 : q.max ?? 0)
+				: parsed + delta;
+			editor.setText(String(clampNumberDraft(next, q)));
+		}
+
+		function saveOtherDraft(q: CanonicalQuestion, text: string) {
+			const trimmed = text.trim();
+			if (trimmed === "") return;
+			if (q.type === "select_many") {
+				const cur = answers.get(q.id)?.value;
+				const baseArr: ChoiceAnswer[] = Array.isArray(cur)
+					? (cur.filter(
+							(e) =>
+								typeof e === "object" && e !== null
+								&& (e as { mode?: string }).mode !== "other",
+						) as ChoiceAnswer[])
+					: [];
+				saveAnswer(q, [...baseArr, { mode: "other", text: trimmed }] as AnswerValue);
+				return;
+			}
+			saveAnswer(q, { mode: "other", text: trimmed });
+		}
+
+		function preserveActiveDraft() {
+			if (!inputQuestionId || !inputMode) return;
+			const q = questions.find((question) => question.id === inputQuestionId);
+			if (!q) return;
+			const text = editor.getText();
+			if (inputMode !== "notes") {
+				if (text === "") delete answerDrafts[q.id];
+				else answerDrafts[q.id] = text;
+			}
+			if (inputMode === "free_text") {
+				if (text.trim() !== "") saveAnswer(q, text);
+			} else if (inputMode === "number") {
+				if (text.trim() !== "") {
+					const n = coerceNumber(text, q);
+					if (n !== undefined) saveAnswer(q, n);
+				}
+			} else if (inputMode === "other") {
+				saveOtherDraft(q, text);
+			} else if (inputMode === "text") {
+				const trimmed = text.trim();
+				if (trimmed !== "") saveAnswer(q, trimmed);
+			}
+		}
+
+		function openNotesFromAnswerMode(q: CanonicalQuestion) {
+			const returnMode = inputMode === "notes" ? null : inputMode;
+			preserveActiveDraft();
+			notesReturnMode = returnMode;
+			notesReturnQuestionId = q.id;
+			inputMode = null;
+			inputQuestionId = null;
+			editor.setText("");
+			openNotes(q);
 		}
 
 		function handleInput(data: string) {
@@ -765,6 +848,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// final editor.handleInput(data) at the end of the
 			// inputMode block.
 			let otherHandled = false;
+
+			const isTabKey = data === "\t" || matchesKey(data, Key.tab);
+			if (isTabKey) {
+				if (inputMode === "notes") {
+					closeNotes({ advanceTab: true });
+					return;
+				}
+				const q = currentQuestion();
+				if (q) openNotesFromAnswerMode(q);
+				return;
+			}
 
 			if (inputMode) {
 				if (matchesKey(data, Key.escape)) {
@@ -857,19 +951,15 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					}
 				}
 				if (inputMode === "number" && matchesKey(data, Key.up)) {
-					const cur = Number(editor.getText() || "0");
-					editor.setText(String(Number.isFinite(cur) ? cur + 1 : 1));
+					const q = inputQuestionId ? questions.find((question) => question.id === inputQuestionId) : undefined;
+					if (q) nudgeNumberDraft(q, 1);
 					refresh();
 					return;
 				}
 				if (inputMode === "number" && matchesKey(data, Key.down)) {
-					const cur = Number(editor.getText() || "0");
-					editor.setText(String(Number.isFinite(cur) ? cur - 1 : 0));
+					const q = inputQuestionId ? questions.find((question) => question.id === inputQuestionId) : undefined;
+					if (q) nudgeNumberDraft(q, -1);
 					refresh();
-					return;
-				}
-				if (inputMode === "notes" && matchesKey(data, Key.tab)) {
-					closeNotes({ advanceTab: true });
 					return;
 				}
 				// In notes mode, Enter saves and returns to the answer view.
@@ -1139,6 +1229,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function applyBrowserAnswer(questionId: string, value: AnswerValue) {
 			const q = questions.find((question) => question.id === questionId);
 			if (!q) return;
+			delete answerDrafts[q.id];
 			saveAnswer(q, value, false);
 			if (inputQuestionId === q.id) {
 				if ((inputMode === "free_text" || inputMode === "danger") && typeof value === "string") {
@@ -1155,6 +1246,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		function applyBrowserClearAnswer(questionId: string) {
 			answers.delete(questionId);
 			delete checked[questionId];
+			delete answerDrafts[questionId];
 			scheduleBrowserRefresh();
 		}
 
@@ -1336,7 +1428,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// list, so without inlining the editor the user would type into
 			// a black hole. Inlining guarantees the typed text is echoed so
 			// the user can see what they're confirming.
-			if (isDangerActive(q)) {
+			if (isDangerActive(q) && viewMode !== "notes") {
 				lines.push(
 					theme.fg("warning", theme.bold(`⚠️  DESTRUCTIVE — ${q.header}`)),
 				);
@@ -1439,6 +1531,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					lines.push(theme.fg("muted", "↑/↓ navigate  Enter select  1-9 quick  Tab notes  e preview  o browser  ? help"));
 				}
 			} else if (q.type === "number") {
+				const isEditing = inputMode === "number" && inputQuestionId === q.id;
 				lines.push(theme.fg("muted", "(Enter to edit; ↑/↓ to nudge)"));
 				if (q.min !== undefined || q.max !== undefined) {
 					lines.push(
@@ -1448,13 +1541,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						),
 					);
 				}
-				const current = answers.get(q.id)?.value;
-				if (current !== undefined) {
+				if (isEditing) {
+					const draft = editor.getText();
+					const cursor = theme.fg("accent", "▏");
+					const value = draft.length === 0
+						? theme.fg("dim", "(type a number)")
+						: theme.fg("accent", draft);
 					lines.push("");
-					lines.push(theme.fg("success", `Answered: ${current}`));
+					lines.push(`     ${theme.fg("muted", "Answer:")} ${value}${cursor}`);
+				} else {
+					const current = answers.get(q.id)?.value;
+					if (current !== undefined) {
+						lines.push("");
+						lines.push(theme.fg("success", `Answered: ${current}`));
+					}
 				}
 				lines.push("");
-				lines.push(theme.fg("muted", "Enter to type  Tab notes  ? help  Esc cancel"));
+				lines.push(theme.fg("muted", isEditing ? "[Enter] save answer  Tab notes  Esc close" : "Enter to type  Tab notes  ? help  Esc cancel"));
 			} else if (q.type === "free_text") {
 				const isEditing = inputMode === "free_text" && inputQuestionId === q.id;
 				if (isEditing) {
