@@ -126,6 +126,128 @@ async function connectWs(handle) {
 	};
 }
 
+function createFakeBrowserDom() {
+	const elementsById = new Map();
+	let documentRef;
+
+	class FakeClassList {
+		constructor(element) {
+			this.element = element;
+		}
+		toggle(name, force) {
+			const classes = new Set(this.element.className.split(/\s+/).filter(Boolean));
+			const shouldHave = force ?? !classes.has(name);
+			if (shouldHave) classes.add(name);
+			else classes.delete(name);
+			this.element.className = [...classes].join(" ");
+		}
+		add(name) {
+			this.toggle(name, true);
+		}
+	}
+
+	class FakeElement {
+		constructor(tagName) {
+			this.tagName = tagName.toUpperCase();
+			this.children = [];
+			this.dataset = {};
+			this.style = {};
+			this.className = "";
+			this.classList = new FakeClassList(this);
+			this.value = "";
+			this.textContent = "";
+			this.selectionStart = 0;
+			this.selectionEnd = 0;
+		}
+		set id(value) {
+			this._id = value;
+			elementsById.set(value, this);
+		}
+		get id() {
+			return this._id;
+		}
+		set innerHTML(value) {
+			this._innerHTML = value;
+			for (const child of this.children) child.detach();
+			this.children = [];
+		}
+		get innerHTML() {
+			return this._innerHTML || "";
+		}
+		appendChild(child) {
+			child.parent = this;
+			this.children.push(child);
+			return child;
+		}
+		append(...items) {
+			for (const item of items) {
+				if (typeof item === "string") this.textContent += item;
+				else this.appendChild(item);
+			}
+		}
+		detach() {
+			if (documentRef.activeElement === this) documentRef.activeElement = documentRef.body;
+			for (const child of this.children) child.detach();
+		}
+		focus() {
+			documentRef.activeElement = this;
+			this.onfocus?.();
+		}
+		setSelectionRange(start, end) {
+			this.selectionStart = start;
+			this.selectionEnd = end;
+		}
+		matches(selector) {
+			const focusMatch = selector.match(/^\[data-focus-key="([^"]+)"\]$/);
+			if (focusMatch) return this.dataset.focusKey === focusMatch[1];
+			const checkedNameMatch = selector.match(/^\[name="([^"]+)"\]:checked$/);
+			if (checkedNameMatch) return this.name === checkedNameMatch[1] && this.checked;
+			return false;
+		}
+		findAll(predicate, out = []) {
+			if (predicate(this)) out.push(this);
+			for (const child of this.children) child.findAll(predicate, out);
+			return out;
+		}
+	}
+
+	const document = {
+		body: null,
+		activeElement: null,
+		createElement(tagName) {
+			return new FakeElement(tagName);
+		},
+		getElementById(id) {
+			return elementsById.get(id) || null;
+		},
+		querySelector(selector) {
+			return this.body.findAll((el) => el.matches(selector))[0] || null;
+		},
+		querySelectorAll(selector) {
+			if (selector === "#questions .question") {
+				return this.getElementById("questions").findAll((el) => el.className.split(/\s+/).includes("question"));
+			}
+			return this.body.findAll((el) => el.matches(selector));
+		},
+		addEventListener() {},
+	};
+	documentRef = document;
+	document.body = new FakeElement("body");
+	document.activeElement = document.body;
+	for (const id of ["status", "questions", "overlay", "submit", "cancel"]) {
+		const element = new FakeElement(id === "questions" ? "div" : id === "status" ? "p" : "button");
+		element.id = id;
+		document.body.appendChild(element);
+	}
+	return document;
+}
+
+function scriptFromPage(html) {
+	const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+	assert.equal(scripts.length, 1);
+	return scripts[0];
+}
+
 test("browser server serves healthz and questionnaire page", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
@@ -220,6 +342,67 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /function renderPreview/);
 		assert.match(page.text, /function renderMarkdown/);
 		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page preserves focused text control across websocket answer renders", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		assert.equal(sockets.length, 1);
+
+		const input = document.querySelector('[data-focus-key="q-1-input"]');
+		assert.ok(input);
+		input.value = "hello";
+		input.focus();
+		input.setSelectionRange(3, 3);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": "hello" } }) });
+
+		assert.equal(document.activeElement.dataset.focusKey, "q-1-input");
+		assert.notEqual(document.activeElement, input);
+		assert.equal(document.activeElement.value, "hello");
+		assert.equal(document.activeElement.selectionStart, 3);
+		assert.equal(document.activeElement.selectionEnd, 3);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page avoids unconditional websocket re-renders and restores focused controls", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.equal(page.response.status, 200);
+		assert.match(page.text, /function applyServerMessage/);
+		assert.match(page.text, /if\(dom\.needsRender\) render\(\)/);
+		assert.match(page.text, /function captureFocus/);
+		assert.match(page.text, /function restoreFocus/);
+		assert.match(page.text, /data-focus-key/);
+		assert.match(page.text, /restoreFocus\(focus\)/);
+		assert.match(page.text, /function updateActiveQuestionClasses/);
+		assert.doesNotMatch(page.text, /\n    render\(\);\n  \};/);
 	} finally {
 		await handle.stop();
 	}

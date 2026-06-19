@@ -560,14 +560,45 @@ function connect(){
   socket.onclose = () => { if(terminalLifecycle) return; document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if(message.type === 'state') { state = {...state, ...message}; if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true; }
-    if(message.type === 'tab') state.currentTab = message.currentTab;
-    if(message.type === 'answers') state.answers = message.answers || {};
-    if(message.type === 'options') state.options = message.options || {notes:{}};
-    if(message.type === 'lifecycle' && message.lifecycle !== 'open') { terminalLifecycle = true; clearTimeout(reconnectTimer); document.getElementById('status').textContent = message.lifecycle; document.getElementById('overlay').classList.add('visible'); }
-    render();
+    const dom = applyServerMessage(message);
+    if(dom.needsRender) render();
+    else {
+      if(dom.needsActiveUpdate) updateActiveQuestionClasses();
+      updateLifecycleOverlay();
+    }
   };
 }
+function sameJson(left,right){ return JSON.stringify(left) === JSON.stringify(right); }
+function applyLifecycle(lifecycle){
+  if(!lifecycle) return false;
+  const changed = state.lifecycle !== lifecycle || terminalLifecycle !== (lifecycle !== 'open');
+  state.lifecycle = lifecycle;
+  if(lifecycle !== 'open'){
+    terminalLifecycle = true;
+    clearTimeout(reconnectTimer);
+    document.getElementById('status').textContent = lifecycle;
+  }
+  return changed;
+}
+function applyServerMessage(message){
+  const dom = { needsRender:false, needsActiveUpdate:false };
+  if(message.type === 'state'){
+    if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; dom.needsRender = true; }
+    if(state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
+    if(!sameJson(state.answers, message.answers || {})){ state.answers = message.answers || {}; dom.needsRender = true; }
+    if(!sameJson(state.options, message.options || {notes:{}})){ state.options = message.options || {notes:{}}; dom.needsRender = true; }
+    if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true;
+    applyLifecycle(message.lifecycle);
+    return dom;
+  }
+  if(message.type === 'tab' && state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
+  if(message.type === 'answers' && !sameJson(state.answers, message.answers || {})){ state.answers = message.answers || {}; dom.needsRender = true; }
+  if(message.type === 'options' && !sameJson(state.options, message.options || {notes:{}})){ state.options = message.options || {notes:{}}; dom.needsRender = true; }
+  if(message.type === 'lifecycle' && message.lifecycle !== 'open') applyLifecycle(message.lifecycle);
+  return dom;
+}
+function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', terminalLifecycle); }
+function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); }
 function send(message){ if(socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
 function sendDebounced(message){ clearTimeout(sendTimer); sendTimer = setTimeout(() => send(message), 120); }
 function currentAnswer(i){ return state.answers[String(i)]; }
@@ -593,11 +624,29 @@ function answerValue(q,i,el){
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
 }
-function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); render(); }
+function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
+function captureFocus(){
+  const el = document.activeElement;
+  if(!el || !el.dataset || !el.dataset.focusKey) return null;
+  const focus = { key:el.dataset.focusKey };
+  if(typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number'){
+    focus.start = el.selectionStart;
+    focus.end = el.selectionEnd;
+  }
+  return focus;
+}
+function restoreFocus(focus){
+  if(!focus) return;
+  const el = document.querySelector('[data-focus-key="'+focus.key+'"]');
+  if(!el) return;
+  el.focus({preventScroll:true});
+  if(typeof focus.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(focus.start, focus.end);
+}
 function render(){
+  const focus = captureFocus();
   const root = document.getElementById('questions'); root.innerHTML = '';
-  document.getElementById('overlay').classList.toggle('visible', terminalLifecycle);
+  updateLifecycleOverlay();
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';
@@ -613,6 +662,7 @@ function render(){
       if(q.type === 'number') input.type = 'number'; else if(input.tagName === 'INPUT') input.type = 'text';
       if(q.min !== undefined) input.min = q.min; if(q.max !== undefined) input.max = q.max;
       input.placeholder = q.placeholder || '';
+      input.dataset.focusKey = 'q-'+i+'-input';
       const current = currentAnswer(i); if(current !== undefined) input.value = current;
       input.onfocus = () => activateQuestion(i);
       input.oninput = () => { activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
@@ -620,22 +670,25 @@ function render(){
     }
     section.appendChild(fieldset);
     const notes = document.createElement('textarea'); notes.placeholder = 'Notes'; notes.value = (state.options.notes || {})[q.id] || '';
+    notes.dataset.focusKey = 'q-'+i+'-notes';
     notes.onfocus = () => activateQuestion(i);
     notes.oninput = () => { activateQuestion(i); const next = {...(state.options.notes || {}), [q.id]: notes.value}; state.options.notes = next; sendDebounced({type:'options', options:{notes:next}}); };
     section.appendChild(notes);
     root.appendChild(section);
   });
+  restoreFocus(focus);
 }
 function addChoice(parent,q,i,opt,j,kind){
   const label = document.createElement('label'); label.className = 'row';
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
+  input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
   input.onchange = () => { activateQuestion(i); send({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
   label.appendChild(input); label.append(' '+opt.label);
   parent.appendChild(label);
   if(opt.description){ const d=document.createElement('div'); d.className='muted'; d.textContent=opt.description; parent.appendChild(d); }
-  if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
-  if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); }; parent.appendChild(other); }
+  if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
+  if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); }; parent.appendChild(other); }
 }
 function renderPreview(parent,preview){
   const box=document.createElement('div'); box.className='preview preview-'+preview.type;
