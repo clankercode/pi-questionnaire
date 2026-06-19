@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
+import vm from "node:vm";
 import { once } from "node:events";
 import { normalizeQuestions } from "../src/normalize.ts";
 import { startBrowserSyncServer } from "../src/browser-server.ts";
@@ -219,6 +220,19 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /function renderPreview/);
 		assert.match(page.text, /function renderMarkdown/);
 		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page inline script is syntactically valid", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.equal(page.response.status, 200);
+		const scripts = [...page.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+		assert.equal(scripts.length, 1);
+		assert.doesNotThrow(() => new vm.Script(scripts[0]));
 	} finally {
 		await handle.stop();
 	}

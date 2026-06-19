@@ -646,7 +646,7 @@ function renderPreview(parent,preview){
   } else if(preview.type === 'code'){
     const pre=document.createElement('pre'); const code=document.createElement('code'); code.textContent=preview.content; pre.appendChild(code); box.appendChild(pre);
   } else {
-    const pre=document.createElement('pre'); pre.textContent='['+preview.type+']\n'+preview.content; box.appendChild(pre);
+    const pre=document.createElement('pre'); pre.textContent='['+preview.type+']\\n'+preview.content; box.appendChild(pre);
   }
   parent.appendChild(box);
 }
@@ -655,9 +655,9 @@ function renderMarkdown(markdown){
     .replace(/^### (.*)$/gm,'<h3>$1</h3>')
     .replace(/^## (.*)$/gm,'<h2>$1</h2>')
     .replace(/^# (.*)$/gm,'<h1>$1</h1>')
-    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\\*\\*(.*?)\\*\\*/g,'<strong>$1</strong>')
     .replace(new RegExp(String.fromCharCode(96)+'([^'+String.fromCharCode(96)+']+)'+String.fromCharCode(96),'g'),'<code>$1</code>')
-    .replace(/\n/g,'<br>');
+    .replace(/\\n/g,'<br>');
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
