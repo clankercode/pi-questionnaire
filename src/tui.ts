@@ -1219,7 +1219,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			lines.push("");
 			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
 			if (browser) {
-				lines.push(theme.fg("muted", `🌐 ${browser} (press o to open)`));
+				// Render the URL as a clickable ANSI hyperlink using
+				// OSC 8. Format: ESC ] 8 ; ; URL BEL TEXT ESC ] 8 ; ; BEL
+				// Supported in iTerm2, kitty, alacritty, gnome-terminal,
+				// Windows Terminal, and most modern terminals. Falls back
+				// to plain text in terminals that don't support OSC 8.
+				const link = `\x1b]8;;${browser}\x07${browser}\x1b]8;;\x07`;
+				lines.push(theme.fg("muted", `🌐 ${link} (press o to open)`));
 			} else {
 				lines.push(theme.fg("dim", "🌐 browser sync unavailable"));
 			}
