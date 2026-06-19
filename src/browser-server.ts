@@ -541,7 +541,7 @@ body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0
 <h1>AskUserQuestion</h1>
 <p id="status" class="muted">Connecting...</p>
 <div id="questions"></div>
-<div class="actions"><button id="submit">Submit</button><button id="cancel">Cancel</button></div>
+<div id="actions" class="actions"><button id="submit">Submit</button><button id="cancel">Cancel</button></div>
 <div id="overlay" class="overlay">Connecting to TUI...</div>
 <script>
 const BOOT = ${safeJson(boot)};
@@ -618,6 +618,7 @@ function setOverlayPending(pending, text){
   updateLifecycleOverlay();
 }
 function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
+function setActionsVisible(visible){ document.getElementById('actions').style.display = visible ? '' : 'none'; }
 function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); }
 function send(message){ if(message && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
 function pendingKey(message){ return message.type === 'answer' ? 'answer:'+message.questionId : message.type; }
@@ -632,7 +633,7 @@ function flushDebounced(){ if(pendingSendMessages.length === 0) return; clearTim
 function setLocalAnswer(i,value){ if(value === null) delete state.answers[String(i)]; else state.answers[String(i)] = value; }
 function protectFocusedAnswer(answers){
   const el = document.activeElement;
-  const match = el && el.dataset && /^q-(\d+)-input$/.exec(el.dataset.focusKey || '');
+  const match = el && el.dataset && /^q-(\\d+)-input$/.exec(el.dataset.focusKey || '');
   if(!match) return answers;
   const i = Number(match[1]);
   const q = state.questions[i];
@@ -641,7 +642,7 @@ function protectFocusedAnswer(answers){
 }
 function protectFocusedOptions(options){
   const el = document.activeElement;
-  const match = el && el.dataset && /^q-(\d+)-notes$/.exec(el.dataset.focusKey || '');
+  const match = el && el.dataset && /^q-(\\d+)-notes$/.exec(el.dataset.focusKey || '');
   if(!match) return options;
   const q = state.questions[Number(match[1])];
   if(!q) return options;
@@ -695,9 +696,11 @@ function render(){
   const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
   updateLifecycleOverlay();
   if(terminalLifecycle || state.lifecycle !== 'open'){
+    setActionsVisible(false);
     root.textContent = terminalText();
     return;
   }
+  setActionsVisible(true);
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';

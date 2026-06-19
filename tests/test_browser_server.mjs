@@ -234,10 +234,15 @@ function createFakeBrowserDom() {
 	documentRef = document;
 	document.body = new FakeElement("body");
 	document.activeElement = document.body;
-	for (const id of ["status", "questions", "overlay", "submit", "cancel"]) {
-		const element = new FakeElement(id === "questions" ? "div" : id === "status" ? "p" : "button");
+	for (const id of ["status", "questions", "actions", "overlay"]) {
+		const element = new FakeElement(id === "questions" || id === "actions" ? "div" : id === "status" ? "p" : "button");
 		element.id = id;
 		document.body.appendChild(element);
+	}
+	for (const id of ["submit", "cancel"]) {
+		const element = new FakeElement("button");
+		element.id = id;
+		document.getElementById("actions").appendChild(element);
 	}
 	return document;
 }
@@ -355,7 +360,7 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 	}
 });
 
-test("browser page preserves focused text control across websocket answer renders", async () => {
+test("browser page protects focused answer and notes from stale websocket echoes", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
@@ -382,17 +387,26 @@ test("browser page preserves focused text control across websocket answer render
 
 		const input = document.querySelector('[data-focus-key="q-1-input"]');
 		assert.ok(input);
-		input.value = "hello";
+		input.value = "Oay, no. they did not.";
 		input.focus();
-		input.setSelectionRange(3, 3);
-
-		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": "hello" } }) });
-
+		input.setSelectionRange(5, 5);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": "Oay," } }) });
 		assert.equal(document.activeElement.dataset.focusKey, "q-1-input");
 		assert.notEqual(document.activeElement, input);
-		assert.equal(document.activeElement.value, "hello");
-		assert.equal(document.activeElement.selectionStart, 3);
-		assert.equal(document.activeElement.selectionEnd, 3);
+		assert.equal(document.activeElement.value, "Oay, no. they did not.");
+		assert.equal(document.activeElement.selectionStart, 5);
+		assert.equal(document.activeElement.selectionEnd, 5);
+
+		const notes = document.querySelector('[data-focus-key="q-1-notes"]');
+		assert.ok(notes);
+		notes.value = "asdf  note  spaces";
+		notes.focus();
+		notes.setSelectionRange(6, 6);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "options", options: { notes: { note: "asdf" } } }) });
+		assert.equal(document.activeElement.dataset.focusKey, "q-1-notes");
+		assert.equal(document.activeElement.value, "asdf  note  spaces");
+		assert.equal(document.activeElement.selectionStart, 6);
+		assert.equal(document.activeElement.selectionEnd, 6);
 	} finally {
 		await handle.stop();
 	}
@@ -484,6 +498,7 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 		assert.equal(document.getElementById("status").textContent, "Submitted");
 		assert.equal(document.getElementById("questions").children.length, 0);
 		assert.match(document.getElementById("questions").textContent, /Questionnaire submitted/);
+		assert.equal(document.getElementById("actions").style.display, "none");
 	} finally {
 		await handle.stop();
 	}
