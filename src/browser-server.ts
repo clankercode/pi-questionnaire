@@ -542,25 +542,29 @@ body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0
 <p id="status" class="muted">Connecting...</p>
 <div id="questions"></div>
 <div class="actions"><button id="submit">Submit</button><button id="cancel">Cancel</button></div>
-<div id="overlay" class="overlay">Waiting for TUI...</div>
+<div id="overlay" class="overlay">Connecting to TUI...</div>
 <script>
 const BOOT = ${safeJson(boot)};
 let state = { questions: BOOT.questions, currentTab: BOOT.currentTab, answers: BOOT.answers || {}, options: BOOT.options || {notes:{}}, lifecycle: BOOT.lifecycle || 'open', renderOptions: BOOT.renderOptions };
 let socket;
 let expanded = new Set();
 let sendTimer;
+let pendingSendMessages = [];
 let reconnectTimer;
 let reconnectDelay = 500;
 let terminalLifecycle = state.lifecycle !== 'open';
+let awaitingState = !terminalLifecycle;
 function connect(){
   if(terminalLifecycle) return;
   clearTimeout(reconnectTimer);
+  setOverlayPending(true, 'Connecting to TUI...');
   socket = new WebSocket(BOOT.wsUrl);
-  socket.onopen = () => { reconnectDelay = 500; document.getElementById('status').textContent = 'Connected'; };
-  socket.onclose = () => { if(terminalLifecycle) return; document.getElementById('status').textContent = 'Disconnected; reconnecting...'; reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
+  socket.onopen = () => { reconnectDelay = 500; document.getElementById('status').textContent = 'Connected'; setOverlayPending(true, 'Loading TUI state...'); };
+  socket.onclose = () => { if(terminalLifecycle) return; document.getElementById('status').textContent = 'Disconnected; reconnecting...'; setOverlayPending(true, 'Reconnecting to TUI...'); reconnectTimer = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(8000, reconnectDelay * 2); };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     const dom = applyServerMessage(message);
+    if(message.type === 'state') setOverlayPending(false);
     if(dom.needsRender) render();
     else {
       if(dom.needsActiveUpdate) updateActiveQuestionClasses();
@@ -576,7 +580,8 @@ function applyLifecycle(lifecycle){
   if(lifecycle !== 'open'){
     terminalLifecycle = true;
     clearTimeout(reconnectTimer);
-    document.getElementById('status').textContent = lifecycle;
+    setOverlayPending(false);
+    document.getElementById('status').textContent = lifecycle === 'submitted' ? 'Submitted' : 'Cancelled';
   }
   return changed;
 }
@@ -585,22 +590,61 @@ function applyServerMessage(message){
   if(message.type === 'state'){
     if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; dom.needsRender = true; }
     if(state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
-    if(!sameJson(state.answers, message.answers || {})){ state.answers = message.answers || {}; dom.needsRender = true; }
-    if(!sameJson(state.options, message.options || {notes:{}})){ state.options = message.options || {notes:{}}; dom.needsRender = true; }
+    const nextAnswers = protectFocusedAnswer(message.answers || {});
+    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
+    const nextOptions = protectFocusedOptions(message.options || {notes:{}});
+    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
     if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true;
     applyLifecycle(message.lifecycle);
     return dom;
   }
   if(message.type === 'tab' && state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
-  if(message.type === 'answers' && !sameJson(state.answers, message.answers || {})){ state.answers = message.answers || {}; dom.needsRender = true; }
-  if(message.type === 'options' && !sameJson(state.options, message.options || {notes:{}})){ state.options = message.options || {notes:{}}; dom.needsRender = true; }
+  if(message.type === 'answers'){
+    const nextAnswers = protectFocusedAnswer(message.answers || {});
+    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
+  }
+  if(message.type === 'options'){
+    const nextOptions = protectFocusedOptions(message.options || {notes:{}});
+    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
+  }
   if(message.type === 'lifecycle' && message.lifecycle !== 'open') applyLifecycle(message.lifecycle);
   return dom;
 }
-function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', terminalLifecycle); }
+function setOverlayPending(pending, text){
+  awaitingState = pending && !terminalLifecycle;
+  if(text) document.getElementById('overlay').textContent = text;
+  updateLifecycleOverlay();
+}
+function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
 function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); }
-function send(message){ if(socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
-function sendDebounced(message){ clearTimeout(sendTimer); sendTimer = setTimeout(() => send(message), 120); }
+function send(message){ if(message && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
+function pendingKey(message){ return message.type === 'answer' ? 'answer:'+message.questionId : message.type; }
+function queuePending(message){
+  const key = pendingKey(message);
+  const idx = pendingSendMessages.findIndex(item => item.key === key);
+  if(idx === -1) pendingSendMessages.push({key, message});
+  else pendingSendMessages[idx] = {key, message};
+}
+function sendDebounced(message){ queuePending(message); clearTimeout(sendTimer); sendTimer = setTimeout(flushDebounced, 120); }
+function flushDebounced(){ if(pendingSendMessages.length === 0) return; clearTimeout(sendTimer); const messages = pendingSendMessages; pendingSendMessages = []; messages.forEach(item => send(item.message)); }
+function setLocalAnswer(i,value){ if(value === null) delete state.answers[String(i)]; else state.answers[String(i)] = value; }
+function protectFocusedAnswer(answers){
+  const el = document.activeElement;
+  const match = el && el.dataset && /^q-(\d+)-input$/.exec(el.dataset.focusKey || '');
+  if(!match) return answers;
+  const i = Number(match[1]);
+  const q = state.questions[i];
+  if(!q || q.type !== 'free_text') return answers;
+  return {...answers, [String(i)]: el.value};
+}
+function protectFocusedOptions(options){
+  const el = document.activeElement;
+  const match = el && el.dataset && /^q-(\d+)-notes$/.exec(el.dataset.focusKey || '');
+  if(!match) return options;
+  const q = state.questions[Number(match[1])];
+  if(!q) return options;
+  return {...options, notes:{...(options.notes || {}), [q.id]:el.value}};
+}
 function currentAnswer(i){ return state.answers[String(i)]; }
 function optionValue(opt){ return opt.isOther ? '__other__' : opt.label; }
 function isOtherAnswer(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'other'; }
@@ -665,7 +709,7 @@ function render(){
       input.dataset.focusKey = 'q-'+i+'-input';
       const current = currentAnswer(i); if(current !== undefined) input.value = current;
       input.onfocus = () => activateQuestion(i);
-      input.oninput = () => { activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
+      input.oninput = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); };
       fieldset.appendChild(input);
     }
     section.appendChild(fieldset);
@@ -714,7 +758,7 @@ function renderMarkdown(markdown){
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
-document.getElementById('submit').onclick = () => send({type:'submit'});
+document.getElementById('submit').onclick = () => { flushDebounced(); send({type:'submit'}); };
 document.getElementById('cancel').onclick = () => send({type:'cancel'});
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);

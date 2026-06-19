@@ -799,16 +799,44 @@ test("browser-origin tab and answer updates debounce TUI refresh", async () => {
 	);
 
 	component.applyBrowserTab(1);
-	component.applyBrowserAnswer("b", "hello from browser");
+	component.applyBrowserAnswer("b", "  hello   from browser  ");
 	assert.equal(renderCount, 0, "browser activity should not refresh the TUI immediately");
 	assert.equal(component.getBrowserState().currentTab, 1);
-	assert.deepEqual(component.getBrowserState().answers, { "1": "hello from browser" });
+	assert.deepEqual(component.getBrowserState().answers, { "1": "  hello   from browser  " });
 
 	await new Promise((resolve) => setTimeout(resolve, 20));
 	assert.equal(renderCount, 1, "one idle refresh should fire after the debounce window");
 	component.applyBrowserAnswer("a", { mode: "option", value: "Red" });
 	component.applyBrowserSubmit();
 	assert.equal(doneValue.lifecycle, "answered");
+	assert.equal(doneValue.answers.find((answer) => answer.id === "b")?.value, "  hello   from browser  ");
+});
+
+test("browser-origin notes are included in submitted TUI result", () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },
+		{ id: "b", header: "b", question: "B?", type: "free_text" },
+	]);
+	let doneValue = null;
+	const factory = buildQuestionnaireComponent({
+		questions,
+		terminalWriter: silentWriter,
+		browserIdleMs: 5,
+	});
+	const component = factory(
+		makeFakeTui(),
+		fakeTheme,
+		{},
+		(v) => { doneValue = v; },
+	);
+
+	component.applyBrowserAnswer("a", { mode: "option", value: "Red" });
+	component.applyBrowserAnswer("b", "done");
+	component.applyBrowserOptions({ notes: { b: "  browser note  " } });
+	component.applyBrowserSubmit();
+
+	assert.equal(doneValue.lifecycle, "answered");
+	assert.deepEqual(doneValue.notes, { b: "  browser note  " });
 });
 
 test("browser-origin submit is blocked until every question is answered", async () => {

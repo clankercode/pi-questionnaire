@@ -73,6 +73,7 @@ test("AskUserQuestion clears side effects when ctx.ui.custom throws", async () =
 
 		try {
 			setInMemorySettings({
+				browserEnabled: false,
 				notificationOnQuestion: true,
 				notificationDelaySeconds: 5,
 				heartbeatWhileActive: false,
@@ -133,8 +134,8 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 			"call-browser",
 			{
 				questions: [
-					{ header: "Pick", question: "Pick?", type: "select_one", options: [{ label: "A" }] },
-					{ header: "Note", question: "Note?", type: "free_text" },
+					{ id: "pick", header: "Pick", question: "Pick?", type: "select_one", options: [{ label: "A" }] },
+					{ id: "note", header: "Note", question: "Note?", type: "free_text" },
 				],
 			},
 			new AbortController().signal,
@@ -151,6 +152,7 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 						component.handleInput("\r"); // select first option, advance to free_text
 						component.handleInput("o");
 						component.handleInput("k");
+						component.applyBrowserOptions({ notes: { note: "browser note" } });
 						component.handleInput("\r"); // commit free_text, advance to submit
 						component.handleInput("\r"); // submit
 						return doneValue;
@@ -160,6 +162,8 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 		);
 		assert.match(rendered, /http:\/\/127\.0\.0\.1:\d+\/q\//);
 		assert.equal(result.details.lifecycle, "answered");
+		assert.deepEqual(result.details.notes, { note: "browser note" });
+		assert.match(result.content[0].text, /note \(Note\): browser note/);
 		assert.match(result.details.url, /http:\/\/127\.0\.0\.1:\d+\/q\//);
 		assert.equal(typeof result.details.port, "number");
 		await assert.rejects(fetch(`http://127.0.0.1:${result.details.port}/healthz`));

@@ -309,14 +309,19 @@ test("browser websocket accepts answer, tab, submit, and cancel messages", async
 		assert.deepEqual(answers.answers, { "0": { mode: "option", value: "Red" } });
 		assert.deepEqual(events[0], { type: "answer", questionId: "color", value: { mode: "option", value: "Red" } });
 
+		client.send({ type: "answer", questionId: "note", value: "  keep   all spaces  " });
+		const textAnswers = await client.nextMessage("answers");
+		assert.equal(textAnswers.answers["1"], "  keep   all spaces  ");
+		assert.deepEqual(events[1], { type: "answer", questionId: "note", value: "  keep   all spaces  " });
+
 		client.send({ type: "tab", currentTab: 1 });
 		assert.deepEqual(await client.nextMessage("tab"), { type: "tab", currentTab: 1 });
-		assert.deepEqual(events[1], { type: "tab", currentTab: 1 });
+		assert.deepEqual(events[2], { type: "tab", currentTab: 1 });
 
 		client.send({ type: "submit" });
 		client.send({ type: "cancel" });
 		await new Promise((resolve) => setTimeout(resolve, 20));
-		assert.deepEqual(events.slice(2), [{ type: "submit" }, { type: "cancel" }]);
+		assert.deepEqual(events.slice(3), [{ type: "submit" }, { type: "cancel" }]);
 	} finally {
 		client?.close();
 		await handle.stop();
@@ -335,9 +340,12 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
 		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
 		assert.match(page.text, /if\(terminalLifecycle\) return/);
-		assert.match(page.text, /classList\.toggle\('visible', terminalLifecycle\)/);
 		assert.match(page.text, /let terminalLifecycle = state\.lifecycle !== 'open'/);
+		assert.match(page.text, /let awaitingState = !terminalLifecycle/);
+		assert.match(page.text, /setOverlayPending\(true, 'Connecting to TUI\.\.\.'\)/);
+		assert.match(page.text, /classList\.toggle\('visible', awaitingState && !terminalLifecycle\)/);
 		assert.match(page.text, /if\(message\.lifecycle && message\.lifecycle !== 'open'\) terminalLifecycle = true/);
+		assert.doesNotMatch(page.text, /classList\.toggle\('visible', terminalLifecycle\)/);
 		assert.doesNotMatch(page.text, /classList\.toggle\('visible', state\.currentTab === state\.questions\.length\)/);
 		assert.match(page.text, /function renderPreview/);
 		assert.match(page.text, /function renderMarkdown/);
@@ -385,6 +393,95 @@ test("browser page preserves focused text control across websocket answer render
 		assert.equal(document.activeElement.value, "hello");
 		assert.equal(document.activeElement.selectionStart, 3);
 		assert.equal(document.activeElement.selectionEnd, 3);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page flushes pending answer and notes before submit", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		assert.equal(sockets.length, 1);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const input = document.querySelector('[data-focus-key="q-1-input"]');
+		assert.ok(input);
+		input.value = "  keep   answer spaces  ";
+		input.focus();
+		input.oninput();
+
+		const notes = document.querySelector('[data-focus-key="q-1-notes"]');
+		assert.ok(notes);
+		notes.value = "  keep   note spaces  ";
+		notes.focus();
+		notes.oninput();
+
+		document.getElementById("submit").onclick();
+		assert.deepEqual(sent.slice(-3), [
+			{ type: "answer", questionId: "note", value: "  keep   answer spaces  " },
+			{ type: "options", options: { notes: { note: "  keep   note spaces  " } } },
+			{ type: "submit" },
+		]);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page hides pending overlay after terminal lifecycle", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		const overlay = document.getElementById("overlay");
+		assert.match(overlay.className, /visible/);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+		assert.doesNotMatch(overlay.className, /visible/);
+		sockets[0].onclose();
+		assert.match(overlay.className, /visible/);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
+		assert.doesNotMatch(overlay.className, /visible/);
+		assert.equal(document.getElementById("status").textContent, "Submitted");
 	} finally {
 		await handle.stop();
 	}

@@ -17,6 +17,18 @@ import {
 } from "./settings-menu.ts";
 import type { AnswerMap, CanonicalQuestion, ToolResultDetails } from "./types.ts";
 
+function questionForNoteKey(questions: CanonicalQuestion[], key: string): CanonicalQuestion | undefined {
+	return questions.find((question) => question.id === key) ?? questions[Number(key)];
+}
+
+function appendNoteLines(lines: string[], questions: CanonicalQuestion[], notes?: Record<string, string>): void {
+	if (!notes) return;
+	for (const [key, value] of Object.entries(notes)) {
+		const question = questionForNoteKey(questions, key);
+		if (question) lines.push(`note (${question.header}): ${value}`);
+	}
+}
+
 function formatAnswers(
 	questions: CanonicalQuestion[],
 	answers: AnswerMap,
@@ -49,13 +61,7 @@ function formatAnswers(
 		}
 		lines.push(`${lbl}: ${display}`);
 	}
-	if (notes) {
-		for (const [k, v] of Object.entries(notes)) {
-			const idx = Number(k);
-			const q = questions[idx];
-			if (q) lines.push(`note (${q.header}): ${v}`);
-		}
-	}
+	appendNoteLines(lines, questions, notes);
 	return lines.join("\n") || "(no answers recorded)";
 }
 
@@ -102,6 +108,7 @@ function renderResultText(details: ToolResultDetails, theme: any): string {
 			`${theme.fg("success", "✓ ")}${theme.fg("accent", q.header)}: ${display}`,
 		);
 	}
+	appendNoteLines(lines, details.questions, details.notes);
 	return lines.join("\n");
 }
 
