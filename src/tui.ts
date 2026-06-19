@@ -23,6 +23,7 @@ import type {
 	RenderOption,
 } from "./types.ts";
 import { coerceNumber, getRenderOptions } from "./answers.ts";
+import { hyperlink, setTitle, BEL } from "./ansi.ts";
 import { getSettings } from "./settings.ts";
 
 // ---- Public types ---------------------------------------------------------
@@ -215,9 +216,7 @@ export function setTerminalTitle(
 	title: string,
 	write: (s: string) => void = (s) => process.stdout.write(s),
 ): void {
-	// OSC 0 ; title ST  (where ST is \x1b\\ or BEL).
-	// We use BEL (\x07) which is the simpler, broadly-supported terminator.
-	write(`\x1b]0;${title}\x07`);
+	write(setTitle(title));
 }
 
 /** Clear the terminal title. */
@@ -228,8 +227,6 @@ export function clearTerminalTitle(
 }
 
 // ---- Terminal bell (BEL) -------------------------------------------------
-
-const BEL = "\x07";
 
 /**
  * Play an audible terminal bell (BEL, \x07). Gated by the
@@ -1219,12 +1216,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			lines.push("");
 			lines.push(theme.fg("muted", `⏱  ${elapsed} elapsed`));
 			if (browser) {
-				// Render the URL as a clickable ANSI hyperlink using
-				// OSC 8. Format: ESC ] 8 ; ; URL BEL TEXT ESC ] 8 ; ; BEL
-				// Supported in iTerm2, kitty, alacritty, gnome-terminal,
-				// Windows Terminal, and most modern terminals. Falls back
-				// to plain text in terminals that don't support OSC 8.
-				const link = `\x1b]8;;${browser}\x07${browser}\x1b]8;;\x07`;
+				const link = hyperlink(browser, browser);
 				lines.push(theme.fg("muted", `🌐 ${link} (press o to open)`));
 			} else {
 				lines.push(theme.fg("dim", "🌐 browser sync unavailable"));
