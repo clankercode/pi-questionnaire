@@ -1,18 +1,21 @@
 {
-  "name": "pi-questionnaire",
+  "name": "@clanker-code/pi-questionnaire",
   "version": "2.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Claude Code-compatible AskUserQuestion extension for the pi coding agent.",
   "type": "module",
   "license": "(CC0-1.0 OR Unlicense)",
   "author": "XertroV",
   "repository": {
     "type": "git",
-    "url": "https://github.com/clankercode/pi-questionnaire.git"
+    "url": "https://github.com/clanker-code/pi-questionnaire.git"
   },
   "bugs": {
-    "url": "https://github.com/clankercode/pi-questionnaire/issues"
+    "url": "https://github.com/clanker-code/pi-questionnaire/issues"
   },
-  "homepage": "https://github.com/clankercode/pi-questionnaire#readme",
+  "homepage": "https://github.com/clanker-code/pi-questionnaire#readme",
   "keywords": [
     "pi",
     "pi-extension",
