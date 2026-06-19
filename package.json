@@ -1,33 +1,66 @@
 {
   "name": "pi-questionnaire",
-  "version": "0.1.0",
-  "description": "Rich, flexible questionnaire tool for pi coding agent. Supports single/multi-select with rich previews, text, confirm, and number question types — inspired by pag-server's questionnaire v2 contract.",
+  "version": "2.0.1",
+  "description": "Claude Code-compatible AskUserQuestion extension for the pi coding agent.",
   "type": "module",
-  "main": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
+  "license": "MIT",
+  "author": "XertroV",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clankercode/pi-questionnaire.git"
   },
+  "bugs": {
+    "url": "https://github.com/clankercode/pi-questionnaire/issues"
+  },
+  "homepage": "https://github.com/clankercode/pi-questionnaire#readme",
+  "keywords": [
+    "pi",
+    "extension",
+    "questionnaire",
+    "ask",
+    "tui"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test --import tsx tests/*.test.ts",
-    "test:py": "python3 -m pytest tests/ -v",
-    "test:e2e": "bash tests/test_e2e_pi.sh",
-    "test:all": "npm run test:py && bash tests/test_e2e_pi.sh"
+    "build": "tsc",
+    "test": "node --test tests/test_tui_render.mjs tests/test_browser_server.mjs",
+    "test:all": "npm test && python3 -m pytest tests/ -q",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build && npm run test:all"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "^1.1.0"
+    "typebox": "^1.2.14"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.79.0 <1",
+    "@earendil-works/pi-tui": ">=0.79.0 <1"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.6",
+    "@earendil-works/pi-tui": "^0.79.6",
     "@types/node": "^25.9.3",
-    "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
-  },
-  "license": "MIT"
+  }
 }
