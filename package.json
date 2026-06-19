@@ -3,7 +3,7 @@
   "version": "2.0.1",
   "description": "Claude Code-compatible AskUserQuestion extension for the pi coding agent.",
   "type": "module",
-  "license": "MIT",
+  "license": "(CC0-1.0 OR Unlicense)",
   "author": "XertroV",
   "repository": {
     "type": "git",
@@ -15,10 +15,19 @@
   "homepage": "https://github.com/clankercode/pi-questionnaire#readme",
   "keywords": [
     "pi",
-    "extension",
+    "pi-extension",
+    "agent",
+    "question",
     "questionnaire",
     "ask",
-    "tui"
+    "tui",
+    "terminal",
+    "interactive",
+    "multi-select",
+    "single-select",
+    "confirm",
+    "free-text",
+    "browser-sync"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
