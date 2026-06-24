@@ -4,12 +4,12 @@ format: markdown checklist
 use: update items when done
 --------
 
-- radio button not sync'd or saved properly
-- selecting radio 'Yes' in browser ends up selecting Other -> "yes"
-- all `>` indicating current option selection should be replaced with the hand emoji (like mutliselect)
-- selected options should have a blue check mark next to them so it's obvious what's selected (especially when revisiting prior questions)
-- webui works very well (besides radio state not syncing correctly and radio selections populating 'other')
-- when entering 'Other', text field bugs: ctrl+left does move cursor back a word like expected, but visually the cursor doesn't move
+- [x] radio button not sync'd or saved properly
+- [x] selecting radio 'Yes' in browser ends up selecting Other -> "yes"
+- [x] all `>` indicating current option selection should be replaced with the hand emoji (like mutliselect)
+- [x] selected options should have a blue check mark next to them so it's obvious what's selected (especially when revisiting prior questions)
+- [x] webui works very well (besides radio state not syncing correctly and radio selections populating 'other')
+- [x] when entering 'Other', text field bugs: ctrl+left does move cursor back a word like expected, but visually the cursor doesn't move
 
 
 
