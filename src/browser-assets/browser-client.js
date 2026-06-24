@@ -83,13 +83,21 @@ function setOverlayPending(pending, text){
 }
 function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
 function setActionsVisible(visible){ document.getElementById('actions').style.display = visible ? '' : 'none'; }
+function missingAnswerCount(){ let n=0; state.questions.forEach((_,i)=>{ const answer=currentAnswer(i); if(answer === undefined || answer === '' || (Array.isArray(answer) && answer.length === 0)) n++; }); return n; }
+function allAnswered(){ return missingAnswerCount() === 0; }
 function updateActionLabels(){
   const reviewing = isReviewTab();
-  document.getElementById('submit').textContent = reviewing ? 'Confirm Submit' : 'Submit';
+  const missing = missingAnswerCount();
+  const submit = document.getElementById('submit');
+  submit.textContent = reviewing ? 'Confirm Submit' : 'Submit';
+  submit.disabled = missing > 0;
+  submit.setAttribute('aria-disabled', missing > 0 ? 'true' : 'false');
+  const warning = document.getElementById('submit-warning');
+  if(warning) warning.textContent = missing > 0 ? 'Answer all questions before submitting — '+missing+' remaining.' : '';
   const reviewBack = document.getElementById('review-back');
   if(reviewBack) reviewBack.style.display = reviewing ? '' : 'none';
 }
-function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); updateLayoutMode(); renderProgress(); }
+function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); updateLayoutMode(); renderProgress(); updateActionLabels(); }
 function answeredCount(){ let n=0; state.questions.forEach((_,i)=>{ if(currentAnswer(i) !== undefined) n++; }); return n; }
 function renderProgress(){
   const bar = document.getElementById('progress'); if(!bar) return;
@@ -203,7 +211,7 @@ function isReviewTab(){ return state.currentTab === state.questions.length; }
 function reviewBackTab(){ return Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); }
 function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); setTab(state.questions.length); render(); }
 function returnFromSubmitReview(){ setTab(reviewBackTab()); render(); }
-function confirmSubmit(){ flushDebounced(); send({type:'submit'}); }
+function confirmSubmit(){ if(!allAnswered()){ updateActionLabels(); return; } flushDebounced(); send({type:'submit'}); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function isTextValueControl(el){
   if(!el) return false;
@@ -402,7 +410,7 @@ function render(){
       input.dataset.focusKey = 'q-'+i+'-input';
       const current = currentAnswer(i); if(current !== undefined) input.value = current;
       input.onfocus = () => activateQuestion(i);
-      input.oninput = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); };
+      input.oninput = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); updateActionLabels(); sendDebounced({type:'answer', questionId:q.id, value}); };
       fieldset.appendChild(input);
     }
     section.appendChild(fieldset);
@@ -422,14 +430,14 @@ function addChoice(parent,q,i,opt,j,kind){
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
   input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
-  input.onchange = () => { activateQuestion(i); if(kind === 'radio'){ parent.querySelectorAll('input[type=radio][name="'+input.name+'"]').forEach(r => { if(r!==input) r.checked=false; }); parent.querySelectorAll('.choice-row').forEach(r => r.classList.remove('selected')); row.classList.add('selected'); } else { row.classList.toggle('selected', input.checked); } const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); };
+  input.onchange = () => { activateQuestion(i); if(kind === 'radio'){ parent.querySelectorAll('input[type=radio][name="'+input.name+'"]').forEach(r => { if(r!==input) r.checked=false; }); parent.querySelectorAll('.choice-row').forEach(r => r.classList.remove('selected')); row.classList.add('selected'); } else { row.classList.toggle('selected', input.checked); } const value = answerValue(q,i,input); setLocalAnswer(i,value); updateActionLabels(); send({type:'answer', questionId:q.id, value}); };
   const labelText = document.createElement('span'); labelText.className = 'label-text'; labelText.textContent = opt.label;
   row.append(input, labelText);
   row.onclick = (e) => { if(e.target.tagName==='INPUT'||isTextCtrl(e.target)||e.target.tagName==='BUTTON') return; activateQuestion(i); if(kind==='checkbox'){ input.checked=!input.checked; input.onchange(); } else if(kind==='radio'){ if(!input.checked){ input.checked=true; input.onchange(); } } };
   parent.appendChild(row);
   if(opt.description){ const d=document.createElement('div'); d.className='choice-desc'; d.textContent=opt.description; parent.appendChild(d); }
   if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.className='preview-toggle'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
-  if(opt.isOther){ const otherWrap = document.createElement('div'); otherWrap.className = 'choice-other-input'; const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', !!other.value); }; otherWrap.appendChild(other); parent.appendChild(otherWrap); }
+  if(opt.isOther){ const otherWrap = document.createElement('div'); otherWrap.className = 'choice-other-input'; const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); updateActionLabels(); sendDebounced({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', !!other.value); }; otherWrap.appendChild(other); parent.appendChild(otherWrap); }
 }
 function renderPreview(parent,preview){
   const box=document.createElement('div'); box.className='preview preview-'+preview.type;

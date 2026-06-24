@@ -214,6 +214,12 @@ function createFakeBrowserDom() {
 			this.selectionStart = start;
 			this.selectionEnd = end;
 		}
+		setAttribute(name, value) {
+			this[name] = String(value);
+		}
+		getAttribute(name) {
+			return this[name];
+		}
 		matches(selector) {
 			const focusMatch = selector.match(/^\[data-focus-key="([^"]+)"\]$/);
 			if (focusMatch) return this.dataset.focusKey === focusMatch[1];
@@ -270,7 +276,7 @@ function createFakeBrowserDom() {
 	document.body = new FakeElement("body");
 	document.documentElement.appendChild(document.body);
 	document.activeElement = document.body;
-	for (const id of ["status", "progress", "questions", "actions", "overlay", "mode-wrapper"]) {
+	for (const id of ["status", "progress", "questions", "actions", "submit-warning", "overlay", "mode-wrapper"]) {
 		const element = new FakeElement(id === "status" ? "p" : "div");
 		element.id = id;
 		document.body.appendChild(element);
@@ -619,7 +625,7 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 		});
 		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		assert.equal(sockets.length, 1);
-		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Red" } }, options: { notes: {} }, lifecycle: "open" }) });
 
 		const input = document.querySelector('[data-focus-key="q-1-input"]');
 		assert.ok(input);
@@ -680,7 +686,7 @@ test("browser confirm screen Back returns to the previous question view", async 
 			clearTimeout() {},
 		});
 		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
-		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 1, answers: { "0": { mode: "option", value: "Red" }, "1": "done" }, options: { notes: {} }, lifecycle: "open" }) });
 
 		document.getElementById("submit").onclick();
 		document.querySelectorAll(".progress-step")[1].onclick();
@@ -698,7 +704,11 @@ test("browser confirm screen Back returns to the previous question view", async 
 
 test("browser single-question submit remains immediate", async () => {
 	const [question] = QUESTIONS;
-	const handle = await startBrowserSyncServer({ questions: [question], preferredPort: 0 });
+	const handle = await startBrowserSyncServer({
+		questions: [question],
+		initialAnswers: { "0": { mode: "option", value: "Red" } },
+		preferredPort: 0,
+	});
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1708,6 +1718,47 @@ test("browser review screen hides single-question Back and Next controls", async
 
 		assert.match(document.getElementById("mode-wrapper").className, /review-mode/);
 		assert.equal(document.getElementById("back-next").style.display, "none");
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser submit is disabled with clear feedback until all questions are answered", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /submit-warning/);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			window: { matchMedia: () => ({ matches: false, onchange: null }) },
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		assert.equal(document.getElementById("submit").disabled, true);
+		assert.match(document.getElementById("submit-warning").textContent, /Answer all questions/);
+		assert.match(document.getElementById("submit-warning").textContent, /2 remaining/);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Red" }, "1": "done" }, options: { notes: {} }, lifecycle: "open" }) });
+
+		assert.equal(document.getElementById("submit").disabled, false);
+		assert.equal(document.getElementById("submit-warning").textContent, "");
 	} finally {
 		await handle.stop();
 	}

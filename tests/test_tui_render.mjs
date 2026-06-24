@@ -2004,6 +2004,24 @@ test("Submit tab: Left arrow navigates back to the previous question", () => {
 	);
 });
 
+test("Submit tab warns clearly when answers are missing", () => {
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component, getDone } = drive(questions);
+	component.handleInput("1"); // answer q0, leave q1 unanswered
+	component.handleInput("0"); // jump to Submit tab
+	let lines = component.render(80).join("\n");
+	assert.match(lines, /Answer all questions before submitting/);
+	assert.match(lines, /1 question remaining/);
+	assert.match(lines, /Tags: unanswered/);
+	component.handleInput("\r");
+	assert.equal(getDone(), null, "Enter should not submit while answers are missing");
+	lines = component.render(80).join("\n");
+	assert.match(lines, /Answer all questions before submitting/);
+});
+
 test("Submit tab: Enter submits all answers when every question is answered", () => {
 	const questions = [
 		{ header: "Note", question: "Anything else?", type: "free_text" },

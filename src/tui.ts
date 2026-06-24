@@ -478,13 +478,21 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			return currentTab === questions.length;
 		}
 
-		function allAnswered(): boolean {
+		function missingAnswerCount(): number {
+			let missing = 0;
 			for (let i = 0; i < questions.length; i++) {
-				if (!answers.has(questions[i].id)) return false;
+				if (!answers.has(questions[i].id)) {
+					missing += 1;
+					continue;
+				}
 				const a = answers.get(questions[i].id)!;
-				if (a.value === "" || (Array.isArray(a.value) && a.value.length === 0)) return false;
+				if (a.value === "" || (Array.isArray(a.value) && a.value.length === 0)) missing += 1;
 			}
-			return true;
+			return missing;
+		}
+
+		function allAnswered(): boolean {
+			return missingAnswerCount() === 0;
 		}
 
 		function saveAnswer(q: CanonicalQuestion, value: AnswerValue, notifyBrowser = true) {
@@ -1438,9 +1446,14 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 
 			if (isOnSubmit()) {
+				const missing = missingAnswerCount();
 				lines.push(theme.fg("accent", theme.bold("Submit answers")));
 				lines.push("");
-				lines.push(theme.fg("muted", "Review your answers and press Enter to submit, or Esc to cancel."));
+				if (missing > 0) {
+					lines.push(theme.fg("warning", `Answer all questions before submitting — ${missing} question${missing === 1 ? "" : "s"} remaining.`));
+				} else {
+					lines.push(theme.fg("muted", "Review your answers and press Enter to submit, or Esc to cancel."));
+				}
 				lines.push("");
 				for (let i = 0; i < questions.length; i++) {
 					const q = questions[i];
@@ -1457,7 +1470,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						}
 					}
 				lines.push("");
-				lines.push(theme.fg("muted", "[Enter] submit  [Esc] cancel"));
+				lines.push(theme.fg("muted", missing > 0 ? "[Enter] answer all questions first  [Esc] cancel" : "[Enter] submit  [Esc] cancel"));
 				return wrapInFrame(lines, width);
 			}
 
