@@ -1504,17 +1504,23 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// as a compact one-liner below the Other option. Rendering
 				// the full editor chrome (3-4 lines of box-drawing) would
 				// be too tall for a single-line "type a custom answer"
-				// field. The editor's text buffer stays in sync; a cursor
-				// block is appended to show where input will go.
+				// field. The editor's text buffer stays in sync; the cursor
+				// is drawn at the editor's reported cursor column.
 				if (inputMode === "other" && inputQuestionId === q.id) {
 					const draft = editor.getText();
+					const { col } = editor.getCursor();
 					const cursor = theme.fg("accent", "▏");
-					const value = draft.length === 0
-						? theme.fg("dim", "(type a custom answer)")
-						: theme.fg("accent", draft);
-					lines.push(
-						`     ${theme.fg("muted", "Other:")} ${value}${cursor}`,
-					);
+					if (draft.length === 0) {
+						lines.push(
+							`     ${theme.fg("muted", "Other:")} ${theme.fg("dim", "(type a custom answer)")}${cursor}`,
+						);
+					} else {
+						const before = draft.slice(0, col);
+						const after = draft.slice(col);
+						lines.push(
+							`     ${theme.fg("muted", "Other:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`,
+						);
+					}
 				}
 				// [Select] button for multi_select (commits the array)
 				if (q.type === "select_many") {
@@ -1543,12 +1549,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				if (isEditing) {
 					const draft = editor.getText();
+					const { col } = editor.getCursor();
 					const cursor = theme.fg("accent", "▏");
-					const value = draft.length === 0
-						? theme.fg("dim", "(type a number)")
-						: theme.fg("accent", draft);
 					lines.push("");
-					lines.push(`     ${theme.fg("muted", "Answer:")} ${value}${cursor}`);
+					if (draft.length === 0) {
+						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("dim", "(type a number)")}${cursor}`);
+					} else {
+						const before = draft.slice(0, col);
+						const after = draft.slice(col);
+						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`);
+					}
 				} else {
 					const current = answers.get(q.id)?.value;
 					if (current !== undefined) {
@@ -1568,12 +1578,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// inline. Empty state shows the placeholder (preloaded
 					// by reconcileMode) as a dim hint.
 					const draft = editor.getText();
+					const { col } = editor.getCursor();
 					const cursor = theme.fg("accent", "▏");
-					const value = draft.length === 0
-						? theme.fg("dim", "(type your answer)")
-						: theme.fg("accent", draft);
 					lines.push("");
-					lines.push(`     ${theme.fg("muted", "Answer:")} ${value}${cursor}`);
+					if (draft.length === 0) {
+						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("dim", "(type your answer)")}${cursor}`);
+					} else {
+						const before = draft.slice(0, col);
+						const after = draft.slice(col);
+						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`);
+					}
 				} else {
 					lines.push(theme.fg("muted", "(type your answer — Enter saves)"));
 					if (q.placeholder) {
