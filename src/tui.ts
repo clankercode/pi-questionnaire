@@ -112,10 +112,12 @@ function renderOptionLine(
 ) {
 	const isOther = opt.isOther === true;
 	const checkMark = savedSelected ? theme.fg("accent", "✓") : " ";
-	const label = `${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
+	const checkedOtherIndicator = isOther && checked === true ? `${theme.fg("success", "🗹")} ` : "";
+	const label = `${idx + 1}. ${checkedOtherIndicator}${opt.label}${active ? " ✎" : ""}`;
 	const styledLabel = theme.fg(selected ? "accent" : "text", label);
 	const head = (() => {
 		if (checked !== undefined) {
+			if (isOther && checked) return styledLabel;
 			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
 			return `${box} ${checkMark} ${styledLabel}`;
 		}
@@ -1550,12 +1552,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				// Inline editor for Other. The pi-tui Editor captures all
 				// input (word delete, history, multi-line, etc.) via
-				// editor.handleInput() — we just display its current text
-				// as a compact one-liner below the Other option. Rendering
-				// the full editor chrome (3-4 lines of box-drawing) would
-				// be too tall for a single-line "type a custom answer"
-				// field. The editor's text buffer stays in sync; the cursor
-				// is drawn at the editor's reported cursor column.
+				// editor.handleInput(); render its lines directly without
+				// the full editor chrome so multi-line drafts keep the
+				// cursor on the active editor line.
 				if (inputMode === "other" && inputQuestionId === q.id) {
 					appendInlineEditorLines(lines, "Other:", "(type a custom answer)");
 				}

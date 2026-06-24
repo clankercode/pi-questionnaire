@@ -936,6 +936,24 @@ test("? key shows the help overlay", () => {
 	assert.doesNotMatch(after, /Keyboard shortcuts/);
 });
 
+test("selected Other option renders checkbox indicator after the number", () => {
+	const { component } = drive([
+		{ id: "pick", header: "Pick", question: "Pick one?", type: "select_one",
+			options: [{ label: "A" }, { label: "B" }, { label: "C" }] },
+		{ id: "next", header: "Next", question: "Next?", type: "free_text" },
+	]);
+	component.handleInput("\u001b[B"); // B
+	component.handleInput("\u001b[B"); // C
+	component.handleInput("\u001b[B"); // Other
+	for (const ch of "custom") component.handleInput(ch);
+	component.handleInput("\r"); // commit Other and advance
+	component.handleInput("["); // revisit first question
+
+	const lines = component.render(100).join("\n");
+	assert.match(lines, /4\. 🗹 Other ✎/);
+	assert.doesNotMatch(lines, /■\s+4\. Other ✎/);
+});
+
 test("persistent checkmarks: select_one shows ✓ on chosen option after revisit", () => {
 	const { component } = drive([
 		{ id: "a", header: "a", question: "A?", type: "select_one",
