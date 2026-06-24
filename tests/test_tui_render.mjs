@@ -27,12 +27,32 @@ function runHarness(cmd) { return _runHarness(cmd); }
 
 const fakeTui = makeFakeTui();
 const fakeTheme = makeFakeTheme();
+const ansiTheme = makeAnsiTheme();
 
 function makeFakeTheme() {
 	const F = (_color, text) => text; // strip theme markup for stable assertions
 	return {
 		fg: F,
 		bg: F,
+		bold: (s) => s,
+		italic: (s) => s,
+		strikethrough: (s) => s,
+	};
+}
+
+function makeAnsiTheme() {
+	const fgCodes = {
+		accent: "\x1b[36m",
+		text: "\x1b[37m",
+		muted: "\x1b[90m",
+		success: "\x1b[32m",
+		dim: "\x1b[2m",
+		warning: "\x1b[33m",
+	};
+	const fg = (color, text) => `${fgCodes[color] ?? "\x1b[37m"}${text}\x1b[39m`;
+	return {
+		fg,
+		bg: (_color, text) => text,
 		bold: (s) => s,
 		italic: (s) => s,
 		strikethrough: (s) => s,
@@ -53,13 +73,17 @@ function makeFakeTui() {
 const silentWriter = () => {};
 
 function render(questions, width = 80) {
+	return renderWithTheme(questions, fakeTheme, width);
+}
+
+function renderWithTheme(questions, theme, width = 80) {
 	const canonical = normalizeQuestions(questions);
 	const factory = buildQuestionnaireComponent({
 		questions: canonical,
 		terminalWriter: silentWriter,
 	});
 	const tui = makeFakeTui();
-	const component = factory(tui, fakeTheme, {}, () => {});
+	const component = factory(tui, theme, {}, () => {});
 	const lines = component.render(width);
 	return { lines, component };
 }
@@ -148,6 +172,29 @@ test("confirm_enum auto-fills Affirm/Decline + Other", () => {
 	assert.match(joined, /1\. Affirm/);
 	assert.match(joined, /2\. Decline/);
 	assert.match(joined, /3\. Other/);
+});
+
+test("selected single-choice cursor is rendered outside ANSI styling", () => {
+	const { lines: selectOneLines } = renderWithTheme([{
+		header: "Pick",
+		question: "Pick a color?",
+		type: "select_one",
+		options: [{ label: "Red" }, { label: "Blue" }],
+	}], ansiTheme);
+	const selectOneLine = selectOneLines.find((line) => stripAnsi(line).includes("1. Red"));
+	assert.ok(selectOneLine, "selected select_one option should render");
+	assert.doesNotMatch(selectOneLine, /\x1b\[36m👉/, "emoji cursor should not be inside the accent ANSI span");
+	assert.match(selectOneLine, /👉 \x1b\[36m {2}1\. Red/, "accent styling should start after the raw emoji cursor");
+
+	const { lines: confirmLines } = renderWithTheme([{
+		header: "Go",
+		question: "Proceed?",
+		type: "confirm_enum",
+	}], ansiTheme);
+	const confirmLine = confirmLines.find((line) => stripAnsi(line).includes("1. Affirm"));
+	assert.ok(confirmLine, "selected confirm_enum option should render");
+	assert.doesNotMatch(confirmLine, /\x1b\[36m👉/, "emoji cursor should not be inside the accent ANSI span");
+	assert.match(confirmLine, /👉 \x1b\[36m {2}1\. Affirm/, "accent styling should start after the raw emoji cursor");
 });
 
 test("number question shows range", () => {

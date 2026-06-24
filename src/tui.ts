@@ -114,14 +114,13 @@ function renderOptionLine(
 	const checkMark = savedSelected ? theme.fg("accent", "✓") : " ";
 	const head = (() => {
 		if (checked !== undefined) {
-			const arrow = selected ? SELECTOR_ARROW : "   ";
 			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
-			return `${arrow}${box} ${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
+			return `${box} ${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 		}
-		const arrow = selected ? SELECTOR_ARROW : "   ";
-		return `${arrow}${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
+		return `${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 	})();
-	addWrappedWithPrefix(lines, "", theme.fg(selected ? "accent" : "text", head), width);
+	const selector = selected ? SELECTOR_ARROW : "   ";
+	addWrappedWithPrefix(lines, "", `${selector}${theme.fg(selected ? "accent" : "text", head)}`, width);
 	if (opt.description) {
 		addWrappedWithPrefix(lines, "     ", theme.fg("muted", opt.description), width);
 	}
