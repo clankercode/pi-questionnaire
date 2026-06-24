@@ -185,7 +185,7 @@ test("selected single-choice cursor uses pointing-hand emoji outside ANSI stylin
 	assert.ok(selectOneLine, "selected select_one option should render");
 	assert.doesNotMatch(stripAnsi(selectOneLine), />\s+1\. Red/, "single-choice cursor must not fall back to >");
 	assert.doesNotMatch(selectOneLine, /\x1b\[36m👉/, "cursor should not be inside the accent ANSI span");
-	assert.match(selectOneLine, /👉 \x1b\[36m {2}1\. Red/, "accent styling should start after the raw emoji cursor");
+	assert.match(selectOneLine, /👉 {3}\x1b\[36m1\. Red/, "accent styling should start after the raw emoji cursor and marker gap");
 
 	const { lines: confirmLines } = renderWithTheme([{
 		header: "Go",
@@ -196,7 +196,7 @@ test("selected single-choice cursor uses pointing-hand emoji outside ANSI stylin
 	assert.ok(confirmLine, "selected confirm_enum option should render");
 	assert.doesNotMatch(stripAnsi(confirmLine), />\s+1\. Affirm/, "confirm cursor must not fall back to >");
 	assert.doesNotMatch(confirmLine, /\x1b\[36m👉/, "cursor should not be inside the accent ANSI span");
-	assert.match(confirmLine, /👉 \x1b\[36m {2}1\. Affirm/, "accent styling should start after the raw emoji cursor");
+	assert.match(confirmLine, /👉 {3}\x1b\[36m1\. Affirm/, "accent styling should start after the raw emoji cursor and marker gap");
 });
 
 test("number question shows range", () => {
@@ -916,10 +916,33 @@ test("persistent checkmarks: select_one shows ✓ on chosen option after revisit
 	component.handleInput("\r");
 	component.handleInput("[");
 
+	assert.deepEqual(component.getBrowserState().answers["0"], { mode: "option", value: "Blue" }, "saved answer should remain available after navigating back");
 	const linesA = component.render(80).join("\n");
 	assert.match(linesA, /■ a/);
 	assert.match(linesA, /✓ 2\. Blue/);
 	assert.doesNotMatch(linesA, /✓ 1\. Red/);
+});
+
+test("persistent checkmarks render the saved marker with its own accent ANSI span", () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one",
+			options: [{ label: "Red" }, { label: "Blue" }] },
+		{ id: "b", header: "b", question: "B?", type: "select_one",
+			options: [{ label: "Yes" }, { label: "No" }] },
+	]);
+	const factory = buildQuestionnaireComponent({ questions, terminalWriter: silentWriter });
+	const component = factory(makeFakeTui(), ansiTheme, {}, () => {});
+
+	component.handleInput("\u001b[B"); // Blue
+	component.handleInput("\r");
+	component.handleInput("[");
+
+	assert.deepEqual(component.getBrowserState().answers["0"], { mode: "option", value: "Blue" }, "currentValue should contain the canonical saved option");
+	const blueLine = component.render(80).find((line) => stripAnsi(line).includes("2. Blue"));
+	assert.ok(blueLine, "saved option line should render");
+	assert.match(stripAnsi(blueLine), /✓ 2\. Blue/, "savedOptionValue and optionComparableValue should match Blue");
+	assert.match(blueLine, /\x1b\[36m✓\x1b\[39m/, "saved checkmark should be blue/accent");
+	assert.doesNotMatch(blueLine, /\x1b\[37m\x1b\[36m✓/, "saved checkmark should not be nested inside the option text color span");
 });
 
 test("persistent checkmarks tolerate raw string choice answers from sync", () => {
