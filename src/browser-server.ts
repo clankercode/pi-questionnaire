@@ -575,6 +575,84 @@ fieldset{border:0;padding:0;margin:0 0 1rem}
 .preview-toggle{font-size:.8125rem;color:#4361ee;background:none;border:none;cursor:pointer;padding:.25rem .5rem;margin-left:1.75rem}
 .preview-toggle:hover{text-decoration:underline}
 
+/* === Layout & Theme Controls === */
+.controls{display:flex;gap:.75rem;align-items:center}
+.toggle-btn{font-family:inherit;font-size:.75rem;padding:.25rem .625rem;border:1px solid #cbd5e1;border-radius:2px;background:transparent;color:#64748b;cursor:pointer;line-height:1.3;white-space:nowrap}
+.toggle-btn:hover{border-color:#4361ee;color:#4361ee}
+.toggle-btn.active{background:#4361ee;border-color:#4361ee;color:#fff}
+
+/* === Single-question mode === */
+.single-question-mode .question:not(.active){display:none}
+.back-next-controls{display:none;justify-content:space-between;margin-top:1.5rem;padding-top:1rem}
+.single-question-mode .back-next-controls{display:flex}
+.back-next-controls button{font-family:inherit;font-size:.875rem;font-weight:500;padding:.5rem 1.25rem;border:1px solid #cbd5e1;border-radius:2px;background:#fff;color:#1a1a2e;cursor:pointer;transition:all .15s}
+.back-next-controls button:hover{border-color:#4361ee;color:#4361ee}
+.back-next-controls button:disabled{opacity:.4;cursor:default}
+.back-next-controls button.next-btn{background:#4361ee;border-color:#4361ee;color:#fff}
+.back-next-controls button.next-btn:hover{background:#3451d1}
+.cancel-helper{font-size:.8125rem;color:#94a3b8;margin-top:.5rem}
+.actions .confirm-btn{background:#4361ee;border-color:#4361ee;color:#fff}
+.actions .confirm-btn:hover{background:#3451d1}
+
+/* === Dark Mode === */
+[data-theme=dark],[data-theme=auto]{--clr-bg:#14161e;--clr-surface:#1c1f2e;--clr-border:#2d3148;--clr-border-light:#252838;--clr-text:#e8eaf0;--clr-text-secondary:#8b90a8;--clr-text-muted:#5c6078;--clr-accent:#6b8aff;--clr-accent-bg:#1e2744;--clr-hover-bg:#1c1f2e;--clr-header-border:#252838;--clr-overlay:rgba(20,22,30,.92)}
+[data-theme=dark] body,[data-theme=auto] body{background:var(--clr-bg);color:var(--clr-text)}
+[data-theme=dark] .header h1,[data-theme=auto] .header h1{color:var(--clr-text)}
+[data-theme=dark] .header .status-text,[data-theme=auto] .header .status-text{color:var(--clr-text-muted)}
+[data-theme=dark] .progress-band,[data-theme=auto] .progress-band{border-color:var(--clr-border)}
+[data-theme=dark] .progress-step,[data-theme=auto] .progress-step{border-color:var(--clr-border);color:var(--clr-text-muted)}
+[data-theme=dark] .progress-step.answered,[data-theme=auto] .progress-step.answered{border-color:var(--clr-accent);color:var(--clr-accent);background:var(--clr-accent-bg)}
+[data-theme=dark] .progress-step.active,[data-theme=auto] .progress-step.active{color:#fff;background:var(--clr-accent)}
+[data-theme=dark] .progress-step.review,[data-theme=auto] .progress-step.review{border-color:var(--clr-text-muted);color:var(--clr-text-muted)}
+[data-theme=dark] .progress-step.review.active,[data-theme=auto] .progress-step.review.active{color:#fff;background:var(--clr-accent)}
+[data-theme=dark] .progress-info,[data-theme=auto] .progress-info{color:var(--clr-text-muted)}
+[data-theme=dark] .progress-info strong,[data-theme=auto] .progress-info strong{color:var(--clr-text)}
+[data-theme=dark] .question,[data-theme=auto] .question{border-color:var(--clr-border-light)}
+[data-theme=dark] .question .q-number,[data-theme=auto] .question .q-number{color:var(--clr-border)}
+[data-theme=dark] .question.active .q-number,[data-theme=auto] .question.active .q-number{color:var(--clr-accent)}
+[data-theme=dark] .question h2,[data-theme=auto] .question h2{color:var(--clr-text)}
+[data-theme=dark] .question.active h2,[data-theme=auto] .question.active h2{text-decoration-color:var(--clr-accent)}
+[data-theme=dark] .question>p,[data-theme=auto] .question>p{color:var(--clr-text-secondary)}
+[data-theme=dark] .question.active,[data-theme=auto] .question.active{background:linear-gradient(to right,var(--clr-accent-bg) 0,var(--clr-accent-bg) 3px,transparent 3px)}
+[data-theme=dark] .choice-row:hover,[data-theme=auto] .choice-row:hover{background:var(--clr-hover-bg)}
+[data-theme=dark] .choice-row.selected,[data-theme=auto] .choice-row.selected{border-left-color:var(--clr-accent);background:var(--clr-accent-bg)}
+[data-theme=dark] .choice-row input[type=radio],[data-theme=auto] .choice-row input[type=radio],[data-theme=dark] .choice-row input[type=checkbox],[data-theme=auto] .choice-row input[type=checkbox]{accent-color:var(--clr-accent)}
+[data-theme=dark] .choice-row .label-text,[data-theme=auto] .choice-row .label-text{color:var(--clr-text)}
+[data-theme=dark] .choice-desc,[data-theme=auto] .choice-desc{color:var(--clr-text-muted)}
+[data-theme=dark] input[type=text],[data-theme=auto] input[type=text],[data-theme=dark] input[type=number],[data-theme=auto] input[type=number],[data-theme=dark] textarea,[data-theme=auto] textarea{background:var(--clr-surface);border-color:var(--clr-border);color:var(--clr-text)}
+[data-theme=dark] input:focus,[data-theme=auto] input:focus,[data-theme=dark] textarea:focus,[data-theme=auto] textarea:focus{border-color:var(--clr-accent);box-shadow:0 0 0 3px rgba(107,138,255,.15)}
+[data-theme=dark] .notes-field textarea,[data-theme=auto] .notes-field textarea{border-color:var(--clr-border-light);color:var(--clr-text-muted)}
+[data-theme=dark] .notes-field textarea:focus,[data-theme=auto] .notes-field textarea:focus{border-color:var(--clr-accent);color:var(--clr-text)}
+[data-theme=dark] .notes-field textarea::placeholder,[data-theme=auto] .notes-field textarea::placeholder{color:var(--clr-text-muted)}
+[data-theme=dark] .preview,[data-theme=auto] .preview{background:var(--clr-surface);border-color:var(--clr-border)}
+[data-theme=dark] .preview-toggle,[data-theme=auto] .preview-toggle{color:var(--clr-accent)}
+[data-theme=dark] .actions,[data-theme=auto] .actions{border-color:var(--clr-border)}
+[data-theme=dark] .actions button,[data-theme=auto] .actions button{border-color:var(--clr-border);background:var(--clr-surface);color:var(--clr-text)}
+[data-theme=dark] .actions button:hover,[data-theme=auto] .actions button:hover{border-color:var(--clr-accent);color:var(--clr-accent)}
+[data-theme=dark] .back-next-controls button,[data-theme=auto] .back-next-controls button{border-color:var(--clr-border);background:var(--clr-surface);color:var(--clr-text)}
+[data-theme=dark] .back-next-controls button:hover,[data-theme=auto] .back-next-controls button:hover{border-color:var(--clr-accent);color:var(--clr-accent)}
+[data-theme=dark] .back-next-controls button.next-btn,[data-theme=auto] .back-next-controls button.next-btn{background:var(--clr-accent);border-color:var(--clr-accent);color:#fff}
+[data-theme=dark] .back-next-controls button.next-btn:hover,[data-theme=auto] .back-next-controls button.next-btn:hover{background:#5a7aee}
+[data-theme=dark] .toggle-btn,[data-theme=auto] .toggle-btn{border-color:var(--clr-border);color:var(--clr-text-muted)}
+[data-theme=dark] .toggle-btn:hover,[data-theme=auto] .toggle-btn:hover{border-color:var(--clr-accent);color:var(--clr-accent)}
+[data-theme=dark] .toggle-btn.active,[data-theme=auto] .toggle-btn.active{background:var(--clr-accent);border-color:var(--clr-accent);color:#fff}
+[data-theme=dark] .review-ledger,[data-theme=auto] .review-ledger{}
+[data-theme=dark] .review-ledger .ledger-row,[data-theme=auto] .review-ledger .ledger-row{border-color:var(--clr-border-light)}
+[data-theme=dark] .review-ledger .q-num,[data-theme=auto] .review-ledger .q-num{color:var(--clr-text-muted)}
+[data-theme=dark] .review-ledger .ledger-label,[data-theme=auto] .review-ledger .ledger-label{color:var(--clr-text-muted)}
+[data-theme=dark] .review-ledger .ledger-value,[data-theme=auto] .review-ledger .ledger-value{color:var(--clr-text)}
+[data-theme=dark] .review-ledger .ledger-answer,[data-theme=auto] .review-ledger .ledger-answer{color:var(--clr-accent)}
+[data-theme=dark] .review-ledger .ledger-note,[data-theme=auto] .review-ledger .ledger-note{color:var(--clr-text-secondary)}
+[data-theme=dark] .review-ledger .ledger-empty,[data-theme=auto] .review-ledger .ledger-empty{color:var(--clr-text-muted)}
+[data-theme=dark] .submitted-header,[data-theme=auto] .submitted-header{color:var(--clr-text);border-color:var(--clr-accent)}
+[data-theme=dark] .muted,[data-theme=auto] .muted{color:var(--clr-text-secondary)}
+[data-theme=dark] .terminal-text,[data-theme=auto] .terminal-text{color:var(--clr-text-muted)}
+[data-theme=dark] .overlay,[data-theme=auto] .overlay{background:var(--clr-overlay);color:var(--clr-text-muted)}
+[data-theme=dark] .timer,[data-theme=auto] .timer{color:var(--clr-accent)}
+[data-theme=dark] .terminal-actions button,[data-theme=auto] .terminal-actions button{border-color:var(--clr-border);background:var(--clr-surface);color:var(--clr-text)}
+[data-theme=dark] .terminal-actions button:hover,[data-theme=auto] .terminal-actions button:hover{border-color:var(--clr-accent);color:var(--clr-accent)}
+[data-theme=dark] .terminal-actions .primary-btn,[data-theme=auto] .terminal-actions .primary-btn{background:var(--clr-accent);border-color:var(--clr-accent);color:#fff}
+
 /* === Inputs === */
 input[type=text],input[type=number],textarea{font-family:inherit;font-size:.9375rem;padding:.5rem .75rem;border:1px solid #cbd5e1;border-radius:2px;width:100%;max-width:32rem;transition:border-color .15s}
 input[type=text]:focus,input[type=number]:focus,textarea:focus{outline:none;border-color:#4361ee;box-shadow:0 0 0 3px rgba(67,97,238,.12)}
@@ -624,10 +702,15 @@ textarea{resize:vertical;min-height:2.5rem}
 <div class="header">
 <h1>AskUserQuestion</h1>
 <p id="status" class="status-text">Connecting...</p>
+<div class="controls"><button id="theme-toggle" type="button" class="toggle-btn">\u25CC System</button><button id="layout-toggle" type="button" class="toggle-btn">All Qs</button></div>
 </div>
 <div id="progress" class="progress-band"></div>
+<div id="mode-wrapper" class="">
 <div id="questions"></div>
-<div id="actions" class="actions"><button id="submit">Submit</button><button id="cancel">Cancel</button></div>
+<div id="back-next" class="back-next-controls"><button id="back-btn" type="button">Back</button><button id="next-btn" type="button">Next</button></div>
+<div id="actions" class="actions"><button id="submit" class="confirm-btn">Submit</button></div>
+<p class="cancel-helper">To cancel, return to the TUI and press Esc.</p>
+</div>
 <div id="overlay" class="overlay">Connecting to TUI...</div>
 <script>
 const BOOT = ${safeJson(boot)};
@@ -715,8 +798,8 @@ function setOverlayPending(pending, text){
 }
 function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
 function setActionsVisible(visible){ document.getElementById('actions').style.display = visible ? '' : 'none'; }
-function updateActionLabels(){ const reviewing = isReviewTab(); document.getElementById('submit').textContent = reviewing ? 'Confirm Submit' : 'Submit'; document.getElementById('cancel').textContent = reviewing ? 'Back' : 'Cancel'; }
-function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); renderProgress(); }
+function updateActionLabels(){ const reviewing = isReviewTab(); document.getElementById('submit').textContent = reviewing ? 'Confirm Submit' : 'Submit'; }
+function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); updateLayoutMode(); renderProgress(); }
 function answeredCount(){ let n=0; state.questions.forEach((_,i)=>{ if(currentAnswer(i) !== undefined) n++; }); return n; }
 function renderProgress(){
   const bar = document.getElementById('progress'); if(!bar) return;
@@ -728,7 +811,7 @@ function renderProgress(){
     const btn = document.createElement('button'); btn.type='button';
     btn.className = 'progress-step' + (i === state.currentTab && !isReview ? ' active' : '') + (currentAnswer(i) !== undefined ? ' answered' : '');
     btn.textContent = String(i+1);
-    btn.onclick = ()=> setTab(i);
+    btn.onclick = ()=> { if(isReviewTab()){ setTab(i); render(); } else setTab(i); };
     bar.appendChild(btn);
   });
   if(total >= 2){
@@ -992,6 +1075,7 @@ function render(){
   const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
   updateLifecycleOverlay();
   renderProgress();
+  updateLayoutMode();
   if(terminalLifecycle || state.lifecycle !== 'open'){
     renderTerminal(root);
     return;
@@ -1048,9 +1132,10 @@ function addChoice(parent,q,i,opt,j,kind){
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
   input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
-  input.onchange = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', input.checked); };
+  input.onchange = () => { activateQuestion(i); if(kind === 'radio'){ parent.querySelectorAll('input[type=radio][name="'+input.name+'"]').forEach(r => { if(r!==input) r.checked=false; }); parent.querySelectorAll('.choice-row').forEach(r => r.classList.remove('selected')); row.classList.add('selected'); } else { row.classList.toggle('selected', input.checked); } const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); };
   const labelText = document.createElement('span'); labelText.className = 'label-text'; labelText.textContent = opt.label;
   row.append(input, labelText);
+  row.onclick = (e) => { if(e.target.tagName==='INPUT'||isTextCtrl(e.target)||e.target.tagName==='BUTTON') return; activateQuestion(i); if(kind==='checkbox'){ input.checked=!input.checked; input.onchange(); } else if(kind==='radio'){ if(!input.checked){ input.checked=true; input.onchange(); } } };
   parent.appendChild(row);
   if(opt.description){ const d=document.createElement('div'); d.className='choice-desc'; d.textContent=opt.description; parent.appendChild(d); }
   if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.className='preview-toggle'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
@@ -1080,8 +1165,38 @@ function renderMarkdown(markdown){
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
+
+/* === Theme Toggle === */
+const THEME_KEY='pq-theme';
+const themes=[{id:'auto',label:'System',icon:'\u25CC'},{id:'light',label:'Light',icon:'\u2600'},{id:'dark',label:'Dark',icon:'\u263E'}];
+let themeIdx=0;
+function applyTheme(theme){ document.body.dataset.theme=theme; if(typeof localStorage!=='undefined') localStorage.setItem(THEME_KEY,theme); if(theme==='auto'){ mediaQuery.onchange=e=>{ if((localStorage.getItem(THEME_KEY)||'auto')==='auto') document.body.dataset.theme=e.matches?'dark':'auto'; }; if(mediaQuery.matches) document.body.dataset.theme='dark'; } else { mediaQuery.onchange=null; } }
+function toggleTheme(){ themeIdx=(themeIdx+1)%themes.length; applyTheme(themes[themeIdx].id); renderThemeBtn(); }
+function renderThemeBtn(){ const btn=document.getElementById('theme-toggle'); if(!btn)return; const t=themes[themeIdx]; btn.textContent=t.icon+' '+t.label; btn.title='Theme: '+t.label+' (click to cycle)'; }
+function renderLayoutBtn(){ const btn=document.getElementById('layout-toggle'); if(!btn)return; btn.textContent=isSingleMode()?'One Q':'All Qs'; btn.title='Layout: '+(isSingleMode()?'One question at a time':'All questions'); }
+const mediaQuery=(typeof window!=='undefined'&&window.matchMedia)?window.matchMedia('(prefers-color-scheme:dark)'):{matches:false,onchange:null};
+const savedTheme=(typeof localStorage!=='undefined'&&localStorage.getItem(THEME_KEY))||'auto';
+themeIdx=themes.findIndex(t=>t.id===savedTheme);
+if(themeIdx===-1)themeIdx=0;
+applyTheme(themes[themeIdx].id);
+
+/* === Layout Mode === */
+const LAYOUT_KEY='pq-layout';
+let layoutMode=(typeof localStorage!=='undefined'&&localStorage.getItem(LAYOUT_KEY))||'all';
+function isSingleMode(){ return layoutMode==='single'; }
+function updateLayoutMode(){ const wrapper=document.getElementById('mode-wrapper'); if(wrapper) wrapper.classList.toggle('single-question-mode',isSingleMode()); const backBtn=document.getElementById('back-btn'); const nextBtn=document.getElementById('next-btn'); if(backBtn) backBtn.disabled=(state.currentTab===0); if(nextBtn){ const isLastQ=(state.currentTab>=state.questions.length-1); nextBtn.textContent=isLastQ?'Review':'Next'; } }
+function toggleLayout(){ layoutMode=layoutMode==='all'?'single':'all'; if(typeof localStorage!=='undefined') localStorage.setItem(LAYOUT_KEY,layoutMode); renderLayoutBtn(); render(); }
+function goBack(){ if(state.currentTab>0) setTab(state.currentTab-1); render(); }
+function goNext(){ if(isReviewTab()){ confirmSubmit(); return; } if(state.currentTab<state.questions.length-1) setTab(state.currentTab+1); else showSubmitReview(); render(); }
+function isTextCtrl(el){ if(!el)return false; if(el.tagName==='TEXTAREA')return true; if(el.tagName!=='INPUT')return false; return ['text','number','search','email','url','tel','password'].includes(el.type||'text'); }
+renderThemeBtn();
+renderLayoutBtn();
 document.getElementById('submit').onclick = () => { if(isReviewTab()) confirmSubmit(); else if(state.questions.length >= 2) showSubmitReview(); else confirmSubmit(); };
-document.getElementById('cancel').onclick = () => { if(isReviewTab()) returnFromSubmitReview(); else send({type:'cancel'}); };
+document.getElementById('back-btn').onclick = () => { goBack(); };
+document.getElementById('next-btn').onclick = () => { goNext(); };
+document.getElementById('theme-toggle').onclick = () => { toggleTheme(); };
+document.getElementById('layout-toggle').onclick = () => { toggleLayout(); };
+document.addEventListener('keydown', event => { if(event.key==='Enter' && isSingleMode() && !isReviewTab() && isTextCtrl(document.activeElement)){ event.preventDefault(); goNext(); } });
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);
 </script>

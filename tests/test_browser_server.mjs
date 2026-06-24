@@ -145,6 +145,9 @@ function createFakeBrowserDom() {
 		add(name) {
 			this.toggle(name, true);
 		}
+		remove(name) {
+			this.toggle(name, false);
+		}
 	}
 
 	class FakeElement {
@@ -215,12 +218,28 @@ function createFakeBrowserDom() {
 			if (focusMatch) return this.dataset.focusKey === focusMatch[1];
 			const checkedNameMatch = selector.match(/^\[name="([^"]+)"\]:checked$/);
 			if (checkedNameMatch) return this.name === checkedNameMatch[1] && this.checked;
+			if (selector.startsWith('.')) return this.className.split(/\s+/).includes(selector.slice(1));
+			const attrs = [...selector.matchAll(/\[(\w+)=["']?([^"'\]]*)["']?\]/g)];
+			if (attrs.length > 0) {
+				const tagMatch = selector.match(/^(\w+)/);
+				const tag = tagMatch ? tagMatch[1] : null;
+				if (tag && this.tagName !== tag.toUpperCase()) return false;
+				return attrs.every(m => {
+					const [, key, val] = m;
+					if (key === 'type') return this.type === val;
+					if (key === 'name') return this.name === val;
+					return this.dataset[key] === val;
+				});
+			}
 			return false;
 		}
 		findAll(predicate, out = []) {
 			if (predicate(this)) out.push(this);
 			for (const child of this.children) child.findAll(predicate, out);
 			return out;
+		}
+		querySelectorAll(selector) {
+			return this.findAll((el) => el.matches(selector));
 		}
 	}
 
@@ -247,15 +266,25 @@ function createFakeBrowserDom() {
 	documentRef = document;
 	document.body = new FakeElement("body");
 	document.activeElement = document.body;
-	for (const id of ["status", "questions", "actions", "overlay"]) {
-		const element = new FakeElement(id === "questions" || id === "actions" ? "div" : id === "status" ? "p" : "button");
+	for (const id of ["status", "progress", "questions", "actions", "overlay", "mode-wrapper"]) {
+		const element = new FakeElement(id === "status" ? "p" : "div");
 		element.id = id;
 		document.body.appendChild(element);
 	}
-	for (const id of ["submit", "cancel"]) {
+	for (const id of ["submit"]) {
 		const element = new FakeElement("button");
 		element.id = id;
 		document.getElementById("actions").appendChild(element);
+	}
+	for (const id of ["back-btn", "next-btn"]) {
+		const element = new FakeElement("button");
+		element.id = id;
+		document.getElementById("mode-wrapper").appendChild(element);
+	}
+	for (const id of ["theme-toggle", "layout-toggle"]) {
+		const element = new FakeElement("button");
+		element.id = id;
+		document.body.appendChild(element);
 	}
 	return document;
 }
@@ -264,6 +293,15 @@ function scriptFromPage(html) {
 	const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 	assert.equal(scripts.length, 1);
 	return scripts[0];
+}
+
+function createFakeLocalStorage() {
+	const store = new Map();
+	return {
+		getItem(key) { return store.has(key) ? store.get(key) : null; },
+		setItem(key, value) { store.set(key, String(value)); },
+		removeItem(key) { store.delete(key); },
+	};
 }
 
 test("confirm_enum sentinel Other value is not accepted as typed Other text", () => {
@@ -298,6 +336,7 @@ test("browser page treats internal Other sentinel text as unanswered", async () 
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -446,6 +485,7 @@ test("browser page protects focused answer and notes from stale websocket echoes
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -501,6 +541,7 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -528,7 +569,7 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 			{ type: "tab", currentTab: QUESTIONS.length },
 		]);
 		assert.equal(document.getElementById("submit").textContent, "Confirm Submit");
-		assert.equal(document.getElementById("cancel").textContent, "Back");
+		assert.ok(!document.getElementById("cancel"), "cancel button should not exist");
 		const reviewContent = document.getElementById("questions").children[0].textContent;
 		assert.match(reviewContent, /Review/);
 		assert.match(reviewContent, /keep   answer spaces/);
@@ -562,6 +603,7 @@ test("browser confirm screen Back returns to the previous question view", async 
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -570,14 +612,13 @@ test("browser confirm screen Back returns to the previous question view", async 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		document.getElementById("submit").onclick();
-		document.getElementById("cancel").onclick();
+		document.querySelectorAll(".progress-step")[1].onclick();
 
 		assert.deepEqual(sent.slice(-2), [
 			{ type: "tab", currentTab: QUESTIONS.length },
 			{ type: "tab", currentTab: 1 },
 		]);
 		assert.equal(document.getElementById("submit").textContent, "Submit");
-		assert.equal(document.getElementById("cancel").textContent, "Cancel");
 		assert.equal(document.getElementById("questions").children.length, QUESTIONS.length);
 	} finally {
 		await handle.stop();
@@ -603,6 +644,7 @@ test("browser single-question submit remains immediate", async () => {
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -637,6 +679,7 @@ test("browser submitted page shows submitted answers and cancelable close timer"
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			window: { close: () => { closeCount++; } },
 			setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
 			setTimeout() {},
@@ -705,6 +748,7 @@ test("browser submitted page auto-closes after countdown reaches zero", async ()
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			window: { close: () => { closeCount++; } },
 			setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
 			setTimeout() {},
@@ -743,6 +787,7 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -805,6 +850,7 @@ test("browser focused Other text input is not recreated by stale answer echoes",
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -853,6 +899,7 @@ test("browser Other text input sends typed text and survives stale answer echoes
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout(fn) { fn(); return 1; },
 			clearTimeout() {},
@@ -908,6 +955,7 @@ test("browser Other text input survives unrelated option re-renders before debou
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -958,6 +1006,7 @@ test("focused Other text input value survives direct DOM re-renders", async () =
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -1036,6 +1085,7 @@ test("browser page renders the Submit review tab from TUI tab sync", async () =>
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -1242,6 +1292,7 @@ test("browser review ledger renders structured QUESTION/ANSWER/NOTES per questio
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			setInterval() {},
 			setTimeout() {},
 			clearTimeout() {},
@@ -1292,6 +1343,7 @@ test("browser submitted receipt has structured layout with answer values", async
 		const context = vm.createContext({
 			document,
 			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
 			window: { close() {} },
 			setInterval() {},
 			setTimeout() {},
@@ -1313,6 +1365,191 @@ test("browser submitted receipt has structured layout with answer values", async
 		assert.match(text, /remember/);
 		const controls = root.children[2];
 		assert.match(controls.className, /terminal-actions/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("choice row click toggles checkbox and selects radio", async () => {
+	const multiQs = normalizeQuestions([
+		{ id: "color", header: "Color", question: "Pick a color?", type: "select_one", options: [{ label: "Red" }, { label: "Blue" }] },
+		{ id: "features", header: "Features", question: "Pick features?", type: "select_many", options: [{ label: "A" }, { label: "B" }] },
+	]);
+	const handle = await startBrowserSyncServer({ questions: multiQs, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) { this.url = url; this.readyState = FakeWebSocket.OPEN; sockets.push(this); }
+			send(message) { sent.push(JSON.parse(message)); }
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {},
+			setTimeout(fn) { fn(); return 1; },
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: multiQs, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const questionsDiv = document.getElementById("questions");
+		const activeSection = questionsDiv.children[1];
+		const checkboxRows = activeSection.findAll(el => el.className.split(/\s+/).includes('choice-row'));
+		assert.ok(checkboxRows.length >= 2, 'should have checkbox rows');
+		const firstRow = checkboxRows[0];
+		const firstInput = firstRow.children[0];
+		assert.equal(firstInput.type, 'checkbox');
+		assert.equal(firstInput.checked, false);
+
+		firstRow.onclick({ target: firstRow });
+		assert.equal(firstInput.checked, true);
+		assert.ok(firstRow.className.includes('selected'), 'row should be selected after click');
+
+		firstRow.onclick({ target: firstRow });
+		assert.equal(firstInput.checked, false);
+		assert.ok(!firstRow.className.includes('selected'), 'row should be deselected after second click');
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("radio row click selects and clears siblings", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) { this.url = url; this.readyState = FakeWebSocket.OPEN; sockets.push(this); }
+			send(message) { sent.push(JSON.parse(message)); }
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {},
+			setTimeout(fn) { fn(); return 1; },
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const radioRows = document.querySelectorAll('.choice-row');
+		assert.ok(radioRows.length >= 2, 'should have radio rows');
+		const redRow = radioRows[0];
+		const blueRow = radioRows[1];
+		const redInput = redRow.children[0];
+		const blueInput = blueRow.children[0];
+
+		redRow.onclick({ target: redRow });
+		assert.equal(redInput.checked, true);
+		assert.ok(redRow.className.includes('selected'));
+
+		blueRow.onclick({ target: blueRow });
+		assert.equal(blueInput.checked, true);
+		assert.equal(redInput.checked, false);
+		assert.ok(!redRow.className.includes('selected'), 'red row should lose selected class');
+		assert.ok(blueRow.className.includes('selected'), 'blue row should have selected class');
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("progress step click exits review mode", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) { this.url = url; this.readyState = FakeWebSocket.OPEN; sockets.push(this); }
+			send(message) { sent.push(JSON.parse(message)); }
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		document.getElementById("submit").onclick();
+		assert.equal(document.getElementById("submit").textContent, "Confirm Submit");
+
+		const steps = document.querySelectorAll(".progress-step");
+		assert.ok(steps.length >= 2, 'should have progress steps');
+		steps[0].onclick();
+
+		assert.equal(document.getElementById("submit").textContent, "Submit");
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page has theme and layout toggle controls", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /theme-toggle/);
+		assert.match(page.text, /layout-toggle/);
+		assert.match(page.text, /toggle-btn/);
+		assert.match(page.text, /controls/);
+		assert.match(page.text, /localStorage/);
+		assert.match(page.text, /pq-theme/);
+		assert.match(page.text, /pq-layout/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page has dark mode CSS variables and data-theme support", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /data-theme/);
+		assert.match(page.text, /prefers-color-scheme/);
+		assert.match(page.text, /\[data-theme=dark\]/);
+		assert.match(page.text, /--clr-bg/);
+		assert.match(page.text, /--clr-accent/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page has single-question mode layout support", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /single-question-mode/);
+		assert.match(page.text, /back-next-controls/);
+		assert.match(page.text, /back-btn/);
+		assert.match(page.text, /next-btn/);
+		assert.match(page.text, /mode-wrapper/);
+		assert.match(page.text, /isSingleMode/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("cancel button removed and helper text present", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.doesNotMatch(page.text, /<button id="cancel">/);
+		assert.match(page.text, /cancel-helper/);
+		assert.match(page.text, /To cancel, return to the TUI and press Esc/);
 	} finally {
 		await handle.stop();
 	}
