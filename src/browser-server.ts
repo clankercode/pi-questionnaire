@@ -604,6 +604,8 @@ function applyServerMessage(message){
     if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
   }
   if(message.type === 'options'){
+    const protectedAnswers = protectFocusedAnswer(state.answers);
+    if(!sameJson(state.answers, protectedAnswers)) state.answers = protectedAnswers;
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
     if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
   }

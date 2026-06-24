@@ -586,6 +586,54 @@ test("browser Other text input sends typed text and survives stale answer echoes
 	}
 });
 
+test("browser Other text input survives unrelated option re-renders before debounce", async () => {
+	const otherQuestions = normalizeQuestions([
+		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
+		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
+	]);
+	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const decisionOther = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(decisionOther);
+		decisionOther.focus();
+		decisionOther.value = "Need more context";
+		decisionOther.setSelectionRange(7, 7);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "options", options: { notes: { fallback: "server note" } } }) });
+
+		const restoredDecisionOther = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(restoredDecisionOther);
+		assert.equal(document.activeElement.dataset.focusKey, "q-0-other");
+		assert.equal(restoredDecisionOther.value, "Need more context");
+		assert.equal(restoredDecisionOther.selectionStart, 7);
+		assert.equal(restoredDecisionOther.selectionEnd, 7);
+	} finally {
+		await handle.stop();
+	}
+});
+
 test("browser page inline script is syntactically valid", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
