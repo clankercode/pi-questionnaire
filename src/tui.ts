@@ -922,10 +922,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// Note: 'n' is NOT in the nav-key list because it's a
 					// printable character the user might type into the
 					// editor. Tab is the canonical notes toggle, not 'n'.
-					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs
-					// just like [ / ], so they close the Other editor.
+					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs,
+					// so they close the Other editor. Literal [ and ] are
+					// printable text while the editor is active.
 					const isNavKey = matchesKey(data, Key.up) || matchesKey(data, Key.down)
-						|| data === "[" || data === "]" || data === "0"
+						|| data === "0"
 						|| data === "\x1b[D" || data === "\x1b[C"
 						|| matchesKey(data, Key.tab);
 					if (!isNavKey) {

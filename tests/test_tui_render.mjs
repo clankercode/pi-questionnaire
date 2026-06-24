@@ -429,6 +429,21 @@ test("confirm_enum: arrow-down + Enter on Decline returns decline", () => {
 	}
 });
 
+test("select_one Other: bracket characters are typed into the editor", () => {
+	const { component } = drive([{
+		header: "x",
+		question: "Pick?",
+		type: "select_one",
+		options: [{ label: "A" }, { label: "B" }],
+	}]);
+	component.handleInput("\u001b[B"); // down to B
+	component.handleInput("\u001b[B"); // down to Other (auto-opens editor)
+	component.handleInput("[");
+	component.handleInput("]");
+
+	assert.equal(component.getEditorText(), "[]");
+});
+
 test("select_one Other: typing goes to the editor and Enter commits", () => {
 	const { component, getDone } = drive([{
 		header: "x",
