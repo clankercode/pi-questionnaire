@@ -111,17 +111,18 @@ function renderOptionLine(
 	savedSelected: boolean = false,
 ) {
 	const isOther = opt.isOther === true;
-	const checkMark = savedSelected ? theme.fg("accent", "✓") : " ";
-	const checkedOtherIndicator = isOther && checked === true ? `${theme.fg("success", "🗹")} ` : "";
-	const label = `${idx + 1}. ${checkedOtherIndicator}${opt.label}${active ? " ✎" : ""}`;
-	const styledLabel = theme.fg(selected ? "accent" : "text", label);
+	const textColor = selected ? "accent" : "text";
+	const number = theme.fg(textColor, `${idx + 1}. `);
+	const label = theme.fg(textColor, `${opt.label}${active ? " ✎" : ""}`);
 	const head = (() => {
 		if (checked !== undefined) {
-			if (isOther && checked) return styledLabel;
-			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
-			return `${box} ${checkMark} ${styledLabel}`;
+			const mark = isOther && checked
+				? theme.fg("accent", "🗹 ")
+				: theme.fg(checked ? "success" : "muted", `${checked ? "■" : "□"} `);
+			return `${number}${mark}${label}`;
 		}
-		return `${checkMark} ${styledLabel}`;
+		const mark = savedSelected ? theme.fg("accent", "✓ ") : "";
+		return `${number}${mark}${label}`;
 	})();
 	const selector = selected ? (checked === undefined ? SINGLE_CHOICE_CURSOR : SELECTOR_ARROW) : "   ";
 	addWrappedWithPrefix(lines, "", `${selector}${head}`, width);
