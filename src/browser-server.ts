@@ -534,7 +534,7 @@ function renderBrowserPage(state: BrowserSyncServerInternal): string {
 <title>AskUserQuestion</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.45;color:#17202a;background:#fafafa}
-.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions{display:flex;gap:.75rem;margin:1rem 0}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
+.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions{display:flex;gap:.75rem;margin:1rem 0}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
 </style>
 </head>
 <body>
@@ -589,7 +589,7 @@ function applyServerMessage(message){
   const dom = { needsRender:false, needsActiveUpdate:false };
   if(message.type === 'state'){
     if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; dom.needsRender = true; }
-    if(state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
+    if(state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
     const nextAnswers = protectFocusedAnswer(message.answers || {});
     if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
@@ -598,7 +598,7 @@ function applyServerMessage(message){
     if(applyLifecycle(message.lifecycle)) dom.needsRender = true;
     return dom;
   }
-  if(message.type === 'tab' && state.currentTab !== message.currentTab){ state.currentTab = message.currentTab; dom.needsActiveUpdate = true; }
+  if(message.type === 'tab' && state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
   if(message.type === 'answers'){
     const nextAnswers = protectFocusedAnswer(message.answers || {});
     if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
@@ -722,6 +722,25 @@ function restoreFocus(focus){
   if(typeof focus.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(focus.start, focus.end);
 }
 function terminalText(){ return state.lifecycle === 'submitted' ? 'Questionnaire submitted.' : 'Questionnaire cancelled.'; }
+function displayAnswerValue(value){
+  if(value === undefined) return 'unanswered';
+  if(Array.isArray(value)) return value.map(displayAnswerValue).join(', ');
+  if(value && typeof value === 'object'){
+    if(value.mode === 'option') return String(value.value);
+    if(value.mode === 'other') return '(Other) '+String(value.text || '');
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+function submitReviewText(){
+  const lines = ['Submit answers', '', 'Review your answers, then use Submit or Cancel.', ''];
+  state.questions.forEach((q,i)=>{
+    lines.push(q.header+': '+displayAnswerValue(currentAnswer(i)));
+    const note = (state.options.notes || {})[q.id];
+    if(note) lines.push('  note: '+note);
+  });
+  return lines.join('\\n');
+}
 function render(){
   const focus = captureFocus();
   const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
@@ -732,6 +751,14 @@ function render(){
     return;
   }
   setActionsVisible(true);
+  if(state.currentTab === state.questions.length){
+    const section = document.createElement('section');
+    section.className = 'question active submit-review';
+    section.textContent = submitReviewText();
+    root.appendChild(section);
+    restoreFocus(focus);
+    return;
+  }
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
     section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';

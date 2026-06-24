@@ -667,6 +667,44 @@ test("reconnected websocket receives latest full state snapshot", async () => {
 	}
 });
 
+test("browser page renders the Submit review tab from TUI tab sync", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: {} }, lifecycle: "open" }) });
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: QUESTIONS.length }) });
+
+		const root = document.getElementById("questions");
+		assert.equal(root.children.length, 1);
+		assert.match(root.children[0].className, /submit-review/);
+		assert.match(root.children[0].textContent, /Submit answers/);
+		assert.match(root.children[0].textContent, /Color: Blue/);
+		assert.match(root.children[0].textContent, /Note: done/);
+	} finally {
+		await handle.stop();
+	}
+});
+
 test("browser submit rejection keeps lifecycle open and syncs review tab", async () => {
 	const events = [];
 	let acceptsSubmit = false;
