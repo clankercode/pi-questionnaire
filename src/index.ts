@@ -113,6 +113,13 @@ function renderResultText(details: ToolResultDetails, theme: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	const activeBrowserHandles = new Set<BrowserSyncServerHandle>();
+	pi.on("session_shutdown", async () => {
+		const handles = Array.from(activeBrowserHandles);
+		activeBrowserHandles.clear();
+		await Promise.allSettled(handles.map((handle) => handle.stop()));
+	});
+
 	registerSettingsCommand(pi);
 	pi.registerTool({
 		name: "AskUserQuestion",
@@ -187,6 +194,7 @@ export default function (pi: ExtensionAPI) {
 						onCancel: () => activeComponent?.applyBrowserCancel?.(),
 						log: (line) => console.warn(`[pi-questionnaire] ${line}`),
 					});
+					activeBrowserHandles.add(browserHandle);
 				} catch (err) {
 					console.warn(`[pi-questionnaire] Browser sync unavailable: ${(err as Error).message}`);
 				}
@@ -225,7 +233,13 @@ export default function (pi: ExtensionAPI) {
 				// Release timers and the per-call browser server even if the TUI throws
 				// or the session aborts mid-render.
 				sideEffects.clear();
-				await browserHandle?.stop();
+				if (browserHandle) {
+					try {
+						await browserHandle.stop();
+					} finally {
+						activeBrowserHandles.delete(browserHandle);
+					}
+				}
 			}
 
 			if (!result || result.lifecycle === "cancelled") {
