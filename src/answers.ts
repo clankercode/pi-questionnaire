@@ -91,8 +91,9 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 		}
 		if (typeof raw === "object" && raw !== null) {
 			const obj = raw as { mode?: unknown; value?: unknown; text?: unknown };
-			if (obj.mode === "option" && (obj.value === "affirm" || obj.value === "decline")) {
-				return { mode: "option", value: obj.value };
+			if (obj.mode === "option" && typeof obj.value === "string") {
+				const v = obj.value.toLowerCase();
+				if (v === "affirm" || v === "decline") return { mode: "option", value: v };
 			}
 			if (obj.mode === "other" && typeof obj.text === "string") {
 				return { mode: "other", text: obj.text };

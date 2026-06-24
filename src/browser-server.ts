@@ -665,9 +665,22 @@ function otherAnswerText(i){
   return isOtherAnswer(answer) ? answer.text || '' : '';
 }
 function answerValue(q,i,el){
-  if(q.type === 'select_one') return el.value === '__other__' ? (document.getElementById('other-'+i).value || '') : el.value;
-  if(q.type === 'select_many') return Array.from(document.querySelectorAll('[name="q'+i+'"]:checked')).map(x => x.value === '__other__' ? (document.getElementById('other-'+i).value || '') : x.value).filter(Boolean);
-  if(q.type === 'confirm_enum') return el.value;
+  if(q.type === 'select_one'){
+    const otherInput = document.getElementById('other-'+i);
+    if(el.value === '__other__') return otherInput && otherInput.value ? {mode:'other', text:otherInput.value} : null;
+    return {mode:'option', value:el.value};
+  }
+  if(q.type === 'select_many'){
+    return Array.from(document.querySelectorAll('[name="q'+i+'"]:checked')).map(x => {
+      if(x.value === '__other__'){ const t = document.getElementById('other-'+i); return t && t.value ? {mode:'other', text:t.value} : null; }
+      return {mode:'option', value:x.value};
+    }).filter(Boolean);
+  }
+  if(q.type === 'confirm_enum'){
+    const otherInput = document.getElementById('other-'+i);
+    if(el.value === '__other__') return otherInput && otherInput.value ? {mode:'other', text:otherInput.value} : null;
+    return {mode:'option', value: el.value.toLowerCase() === 'affirm' ? 'affirm' : 'decline'};
+  }
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
 }
