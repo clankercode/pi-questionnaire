@@ -119,7 +119,7 @@ function renderOptionLine(
 		}
 		return `${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 	})();
-	const selector = selected ? SELECTOR_ARROW : "   ";
+	const selector = selected ? (checked === undefined ? SINGLE_CHOICE_CURSOR : SELECTOR_ARROW) : "   ";
 	addWrappedWithPrefix(lines, "", `${selector}${theme.fg(selected ? "accent" : "text", head)}`, width);
 	if (opt.description) {
 		addWrappedWithPrefix(lines, "     ", theme.fg("muted", opt.description), width);
@@ -204,11 +204,13 @@ function frameInnerWidth(width: number): number {
 	return width < 12 ? width : width - 2;
 }
 
-/** The cursor selector drawn next to the highlighted option (and the
- *  [Select] button on multi-select). Single source of truth so we only
- *  have to change it once. Some terminals fall back to a plain `>` when
- *  the emoji doesn't render in the option list — that's a known TUI
- *  library rendering quirk, not a bug here. */
+/** Cursor selectors drawn next to highlighted options.
+ *
+ * Single-choice rows use a text presentation glyph rather than emoji so
+ * terminals that substitute unsupported emoji with `>` cannot turn the
+ * cursor back into the old greater-than marker. Multi-select keeps the
+ * pointing-hand glyph, which users reported renders correctly there. */
+export const SINGLE_CHOICE_CURSOR = "▶ ";
 export const SELECTOR_ARROW = "👉 ";
 
 // ---- Terminal title (OSC 0) --------------------------------------------
