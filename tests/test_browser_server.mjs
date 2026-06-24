@@ -522,6 +522,64 @@ test("browser page avoids unconditional websocket re-renders and restores focuse
 	}
 });
 
+test("browser Other text input sends typed text and survives stale answer echoes", async () => {
+	const otherQuestions = normalizeQuestions([
+		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
+		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
+	]);
+	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout(fn) { fn(); return 1; },
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		assert.equal(sockets.length, 1);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const decisionOther = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(decisionOther);
+		decisionOther.focus();
+		decisionOther.value = "Need more context";
+		decisionOther.oninput();
+
+		assert.deepEqual(sent.at(-1), {
+			type: "answer",
+			questionId: "decision",
+			value: { mode: "other", text: "Need more context" },
+		});
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": { mode: "option", value: "decline" } } }) });
+
+		const restoredDecisionOther = document.querySelector('[data-focus-key="q-0-other"]');
+		const fallbackOther = document.querySelector('[data-focus-key="q-1-other"]');
+		assert.ok(restoredDecisionOther);
+		assert.ok(fallbackOther);
+		assert.equal(restoredDecisionOther.value, "Need more context");
+		assert.equal(fallbackOther.value, "");
+	} finally {
+		await handle.stop();
+	}
+});
+
 test("browser page inline script is syntactically valid", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {

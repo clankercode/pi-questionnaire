@@ -633,12 +633,19 @@ function flushDebounced(){ if(pendingSendMessages.length === 0) return; clearTim
 function setLocalAnswer(i,value){ if(value === null) delete state.answers[String(i)]; else state.answers[String(i)] = value; }
 function protectFocusedAnswer(answers){
   const el = document.activeElement;
-  const match = el && el.dataset && /^q-(\\d+)-input$/.exec(el.dataset.focusKey || '');
+  const match = el && el.dataset && /^q-(\\d+)-(input|other)$/.exec(el.dataset.focusKey || '');
   if(!match) return answers;
   const i = Number(match[1]);
+  const role = match[2];
   const q = state.questions[i];
-  if(!q || q.type !== 'free_text') return answers;
-  return {...answers, [String(i)]: el.value};
+  if(!q) return answers;
+  if(role === 'input' && q.type === 'free_text') return {...answers, [String(i)]: el.value};
+  if(role === 'other' && (q.type === 'select_one' || q.type === 'select_many' || q.type === 'confirm_enum')){
+    const value = answerValue(q,i,el);
+    if(value === null){ const next = {...answers}; delete next[String(i)]; return next; }
+    return {...answers, [String(i)]: value};
+  }
+  return answers;
 }
 function protectFocusedOptions(options){
   const el = document.activeElement;
@@ -664,21 +671,30 @@ function otherAnswerText(i){
   if(Array.isArray(answer)){ const other = answer.find(isOtherAnswer); return other ? other.text || '' : ''; }
   return isOtherAnswer(answer) ? answer.text || '' : '';
 }
+function otherInputId(q,i){ return 'other-'+i+'-'+String(q.id || i).replace(/[^a-zA-Z0-9_-]/g, '_'); }
+function isOtherTextInput(el){ return el && el.dataset && el.dataset.inputRole === 'other'; }
+function otherTextValue(q,i,el){
+  if(isOtherTextInput(el)) return el.value;
+  const otherInput = document.getElementById(otherInputId(q,i));
+  return otherInput ? otherInput.value : '';
+}
+function otherAnswerValue(q,i,el){
+  const text = otherTextValue(q,i,el);
+  return text ? {mode:'other', text} : null;
+}
 function answerValue(q,i,el){
   if(q.type === 'select_one'){
-    const otherInput = document.getElementById('other-'+i);
-    if(el.value === '__other__') return otherInput && otherInput.value ? {mode:'other', text:otherInput.value} : null;
+    if(isOtherTextInput(el) || el.value === '__other__') return otherAnswerValue(q,i,el);
     return {mode:'option', value:el.value};
   }
   if(q.type === 'select_many'){
     return Array.from(document.querySelectorAll('[name="q'+i+'"]:checked')).map(x => {
-      if(x.value === '__other__'){ const t = document.getElementById('other-'+i); return t && t.value ? {mode:'other', text:t.value} : null; }
+      if(x.value === '__other__') return otherAnswerValue(q,i,isOtherTextInput(el) ? el : x);
       return {mode:'option', value:x.value};
     }).filter(Boolean);
   }
   if(q.type === 'confirm_enum'){
-    const otherInput = document.getElementById('other-'+i);
-    if(el.value === '__other__') return otherInput && otherInput.value ? {mode:'other', text:otherInput.value} : null;
+    if(isOtherTextInput(el) || el.value === '__other__') return otherAnswerValue(q,i,el);
     return {mode:'option', value: el.value.toLowerCase() === 'affirm' ? 'affirm' : 'decline'};
   }
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
@@ -750,12 +766,12 @@ function addChoice(parent,q,i,opt,j,kind){
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
   input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
-  input.onchange = () => { activateQuestion(i); send({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); };
+  input.onchange = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); };
   label.appendChild(input); label.append(' '+opt.label);
   parent.appendChild(label);
   if(opt.description){ const d=document.createElement('div'); d.className='muted'; d.textContent=opt.description; parent.appendChild(d); }
   if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
-  if(opt.isOther){ const other=document.createElement('input'); other.id='other-'+i; other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); sendDebounced({type:'answer', questionId:q.id, value:answerValue(q,i,input)}); }; parent.appendChild(other); }
+  if(opt.isOther){ const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); }; parent.appendChild(other); }
 }
 function renderPreview(parent,preview){
   const box=document.createElement('div'); box.className='preview preview-'+preview.type;
