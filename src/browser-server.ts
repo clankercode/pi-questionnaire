@@ -588,13 +588,14 @@ function applyLifecycle(lifecycle){
 }
 function applyServerMessage(message){
   const dom = { needsRender:false, needsActiveUpdate:false };
+  const focusedTextControl = isTextValueControl(document.activeElement);
   if(message.type === 'state'){
     if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); dom.needsRender = true; }
     if(state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; if(state.currentTab < state.questions.length) reviewReturnTab = state.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
     const nextAnswers = protectFocusedAnswer(message.answers || {});
-    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
+    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; if(!focusedTextControl) dom.needsRender = true; }
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
-    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
+    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; if(!focusedTextControl) dom.needsRender = true; }
     if(message.lifecycle && message.lifecycle !== 'open') terminalLifecycle = true;
     if(applyLifecycle(message.lifecycle)) dom.needsRender = true;
     return dom;
@@ -602,13 +603,13 @@ function applyServerMessage(message){
   if(message.type === 'tab' && state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; if(state.currentTab < state.questions.length) reviewReturnTab = state.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
   if(message.type === 'answers'){
     const nextAnswers = protectFocusedAnswer(message.answers || {});
-    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
+    if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; if(!focusedTextControl) dom.needsRender = true; }
   }
   if(message.type === 'options'){
     const protectedAnswers = protectFocusedAnswer(state.answers);
     if(!sameJson(state.answers, protectedAnswers)) state.answers = protectedAnswers;
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
-    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; dom.needsRender = true; }
+    if(!sameJson(state.options, nextOptions)){ state.options = nextOptions; if(!focusedTextControl) dom.needsRender = true; }
   }
   if(message.type === 'lifecycle' && message.lifecycle !== 'open'){
     if(applyLifecycle(message.lifecycle)) dom.needsRender = true;

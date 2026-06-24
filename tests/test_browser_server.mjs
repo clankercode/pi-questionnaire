@@ -447,7 +447,7 @@ test("browser page protects focused answer and notes from stale websocket echoes
 		input.setSelectionRange(5, 5);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": "Oay," } }) });
 		assert.equal(document.activeElement.dataset.focusKey, "q-1-input");
-		assert.notEqual(document.activeElement, input);
+		assert.equal(document.activeElement, input);
 		assert.equal(document.activeElement.value, "Oay, no. they did not.");
 		assert.equal(document.activeElement.selectionStart, 5);
 		assert.equal(document.activeElement.selectionEnd, 5);
@@ -655,6 +655,51 @@ test("browser page avoids unconditional websocket re-renders and restores focuse
 		assert.match(page.text, /restoreFocus\(focus\)/);
 		assert.match(page.text, /function updateActiveQuestionClasses/);
 		assert.doesNotMatch(page.text, /\n    render\(\);\n  \};/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser focused Other text input is not recreated by stale answer echoes", async () => {
+	const otherQuestions = normalizeQuestions([
+		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
+		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
+	]);
+	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		const decisionOther = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(decisionOther);
+		decisionOther.focus();
+		decisionOther.value = "Need more context";
+		decisionOther.setSelectionRange(7, 7);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "answers", answers: { "1": { mode: "option", value: "decline" } } }) });
+
+		assert.equal(document.activeElement, decisionOther, "focused Other input should not be destroyed during stale echo handling");
+		assert.equal(decisionOther.value, "Need more context");
+		assert.equal(decisionOther.selectionStart, 7);
 	} finally {
 		await handle.stop();
 	}
