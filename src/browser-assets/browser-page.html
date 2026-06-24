@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AskUserQuestion</title>
+<link rel="stylesheet" href="/assets/browser-style.css?v={{ASSET_VERSION}}">
+<script>globalThis.__PI_QUESTIONNAIRE_BOOT__ = {{BOOT_JSON}};</script>
+<script src="/assets/browser-client.js?v={{ASSET_VERSION}}" defer></script>
+</head>
+<body>
+<div class="header">
+<h1>AskUserQuestion</h1>
+<p id="status" class="status-text">Connecting...</p>
+<div class="controls"><button id="theme-toggle" type="button" class="toggle-btn">◌ System</button><button id="layout-toggle" type="button" class="toggle-btn">All Qs</button></div>
+</div>
+<div id="progress" class="progress-band"></div>
+<div id="mode-wrapper" class="">
+<div id="questions"></div>
+<div id="back-next" class="back-next-controls"><button id="back-btn" type="button">Back</button><button id="next-btn" type="button">Next</button></div>
+<div id="actions" class="actions"><button id="review-back" type="button">Back</button><button id="submit" class="confirm-btn">Submit</button></div>
+<p class="cancel-helper">To cancel, return to the TUI and press Esc.</p>
+</div>
+<div id="overlay" class="overlay">Connecting to TUI...</div>
+</body>
+</html>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import vm from "node:vm";
 import { once } from "node:events";
+import { readFile, writeFile } from "node:fs/promises";
 import { coerceAnswer } from "../src/answers.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
 import { startBrowserSyncServer } from "../src/browser-server.ts";
@@ -271,7 +272,7 @@ function createFakeBrowserDom() {
 		element.id = id;
 		document.body.appendChild(element);
 	}
-	for (const id of ["submit"]) {
+	for (const id of ["review-back", "submit"]) {
 		const element = new FakeElement("button");
 		element.id = id;
 		document.getElementById("actions").appendChild(element);
@@ -289,10 +290,34 @@ function createFakeBrowserDom() {
 	return document;
 }
 
-function scriptFromPage(html) {
-	const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-	assert.equal(scripts.length, 1);
-	return scripts[0];
+async function browserAssetBundle(html, baseUrl) {
+	const urls = [
+		...[...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((match) => match[1]),
+		...[...html.matchAll(/<script src="([^"]+)"[^>]*><\/script>/g)].map((match) => match[1]),
+	];
+	const assets = [];
+	for (const path of urls) {
+		const response = await fetch(new URL(path, baseUrl));
+		assert.equal(response.status, 200);
+		assets.push(await response.text());
+	}
+	return [html, ...assets].join("\n");
+}
+
+async function scriptFromPage(html, baseUrl) {
+	const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+	const externalScriptUrls = [...html.matchAll(/<script src="([^"]+)"[^>]*><\/script>/g)].map(
+		(match) => new URL(match[1], baseUrl).toString(),
+	);
+	const externalScripts = [];
+	for (const url of externalScriptUrls) {
+		const response = await fetch(url);
+		assert.equal(response.status, 200);
+		externalScripts.push(await response.text());
+	}
+	assert.ok(inlineScripts.length >= 1, "page should include boot script");
+	assert.ok(externalScripts.length >= 1, "page should include external client script");
+	return [...inlineScripts, ...externalScripts].join("\n");
 }
 
 function createFakeLocalStorage() {
@@ -341,7 +366,7 @@ test("browser page treats internal Other sentinel text as unanswered", async () 
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 
 		const otherInput = document.querySelector('[data-focus-key="q-0-other"]');
 		const otherRadio = document.querySelector('[data-focus-key="q-0-choice-2"]');
@@ -369,14 +394,53 @@ test("browser server serves healthz and questionnaire page", async () => {
 		assert.equal(health.text, "ok");
 
 		const page = await fetchText(handle.url);
+		const bundle = await browserAssetBundle(page.text, handle.url);
 		assert.equal(page.response.status, 200);
 		assert.match(page.response.headers.get("content-type") ?? "", /text\/html/);
+		assert.equal(page.response.headers.get("cache-control"), "no-store");
+		assert.match(page.text, /browser-style\.css/);
+		assert.match(page.text, /browser-client\.js/);
 		assert.match(page.text, /Pick a color\?/);
+		assert.match(bundle, /WebSocket/);
 		assert.match(page.text, new RegExp(`/ws\\?batch=${handle.batchId}&nonce=${handle.nonce}`));
 
 		const forbidden = await fetchText(`http://127.0.0.1:${handle.port}/q/${handle.batchId}?nonce=wrong`);
 		assert.equal(forbidden.response.status, 403);
 	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser assets are served dynamically with no-store caching", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const styleAsset = new URL("../src/browser-assets/browser-style.css", import.meta.url);
+	const originalStyle = await readFile(styleAsset, "utf8");
+	try {
+		const page = await fetchText(handle.url);
+		const styleHref = page.text.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
+		const scriptSrc = page.text.match(/<script src="([^"]+)"[^>]*><\/script>/)?.[1];
+		assert.ok(styleHref);
+		assert.ok(scriptSrc);
+		const styleUrl = new URL(styleHref, handle.url);
+		const scriptUrl = new URL(scriptSrc, handle.url);
+
+		const style = await fetch(styleUrl);
+		assert.equal(style.status, 200);
+		assert.match(style.headers.get("content-type") ?? "", /text\/css/);
+		assert.equal(style.headers.get("cache-control"), "no-store");
+		assert.match(await style.text(), /progress-band/);
+
+		const script = await fetch(scriptUrl);
+		assert.equal(script.status, 200);
+		assert.match(script.headers.get("content-type") ?? "", /javascript/);
+		assert.equal(script.headers.get("cache-control"), "no-store");
+		assert.match(await script.text(), /function render\(/);
+
+		await writeFile(styleAsset, `${originalStyle}\n/* dynamic-asset-sentinel */\n`);
+		const refreshedStyle = await fetch(styleUrl);
+		assert.match(await refreshedStyle.text(), /dynamic-asset-sentinel/);
+	} finally {
+		await writeFile(styleAsset, originalStyle);
 		await handle.stop();
 	}
 });
@@ -444,24 +508,25 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
+		const bundle = await browserAssetBundle(page.text, handle.url);
 		assert.equal(page.response.status, 200);
-		assert.match(page.text, /input\.checked = isChoiceChecked/);
-		assert.match(page.text, /other\.value = otherAnswerText\(i\)/);
-		assert.match(page.text, /input\.onfocus = \(\) => activateQuestion\(i\)/);
-		assert.match(page.text, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
-		assert.match(page.text, /el\.value === '' \? null : Number\(el\.value\)/);
-		assert.match(page.text, /setTimeout\(connect, reconnectDelay\)/);
-		assert.match(page.text, /if\(terminalLifecycle\) return/);
-		assert.match(page.text, /let terminalLifecycle = state\.lifecycle !== 'open'/);
-		assert.match(page.text, /let awaitingState = !terminalLifecycle/);
-		assert.match(page.text, /setOverlayPending\(true, 'Connecting to TUI\.\.\.'\)/);
-		assert.match(page.text, /classList\.toggle\('visible', awaitingState && !terminalLifecycle\)/);
-		assert.match(page.text, /if\(message\.lifecycle && message\.lifecycle !== 'open'\) terminalLifecycle = true/);
-		assert.doesNotMatch(page.text, /classList\.toggle\('visible', terminalLifecycle\)/);
-		assert.doesNotMatch(page.text, /classList\.toggle\('visible', state\.currentTab === state\.questions\.length\)/);
-		assert.match(page.text, /function renderPreview/);
-		assert.match(page.text, /function renderMarkdown/);
-		assert.match(page.text, /document\.activeElement\?\.dataset\?\.previewKey/);
+		assert.match(bundle, /input\.checked = isChoiceChecked/);
+		assert.match(bundle, /other\.value = otherAnswerText\(i\)/);
+		assert.match(bundle, /input\.onfocus = \(\) => activateQuestion\(i\)/);
+		assert.match(bundle, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
+		assert.match(bundle, /el\.value === '' \? null : Number\(el\.value\)/);
+		assert.match(bundle, /setTimeout\(connect, reconnectDelay\)/);
+		assert.match(bundle, /if\(terminalLifecycle\) return/);
+		assert.match(bundle, /let terminalLifecycle = state\.lifecycle !== 'open'/);
+		assert.match(bundle, /let awaitingState = !terminalLifecycle/);
+		assert.match(bundle, /setOverlayPending\(true, 'Connecting to TUI\.\.\.'\)/);
+		assert.match(bundle, /classList\.toggle\('visible', awaitingState && !terminalLifecycle\)/);
+		assert.match(bundle, /if\(message\.lifecycle && message\.lifecycle !== 'open'\) terminalLifecycle = true/);
+		assert.doesNotMatch(bundle, /classList\.toggle\('visible', terminalLifecycle\)/);
+		assert.doesNotMatch(bundle, /classList\.toggle\('visible', state\.currentTab === state\.questions\.length\)/);
+		assert.match(bundle, /function renderPreview/);
+		assert.match(bundle, /function renderMarkdown/);
+		assert.match(bundle, /document\.activeElement\?\.dataset\?\.previewKey/);
 	} finally {
 		await handle.stop();
 	}
@@ -490,7 +555,7 @@ test("browser page protects focused answer and notes from stale websocket echoes
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		assert.equal(sockets.length, 1);
 
 		const input = document.querySelector('[data-focus-key="q-1-input"]');
@@ -546,7 +611,7 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		assert.equal(sockets.length, 1);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
@@ -608,7 +673,7 @@ test("browser confirm screen Back returns to the previous question view", async 
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		document.getElementById("submit").onclick();
@@ -649,7 +714,7 @@ test("browser single-question submit remains immediate", async () => {
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 
 		document.getElementById("submit").onclick();
 
@@ -686,7 +751,7 @@ test("browser submitted page shows submitted answers and cancelable close timer"
 			clearInterval() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({
 			type: "state",
 			questions: QUESTIONS,
@@ -755,7 +820,7 @@ test("browser submitted page auto-closes after countdown reaches zero", async ()
 			clearInterval() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 
@@ -792,7 +857,7 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		const overlay = document.getElementById("overlay");
 		assert.match(overlay.className, /visible/);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
@@ -814,15 +879,16 @@ test("browser page avoids unconditional websocket re-renders and restores focuse
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
+		const bundle = await browserAssetBundle(page.text, handle.url);
 		assert.equal(page.response.status, 200);
-		assert.match(page.text, /function applyServerMessage/);
-		assert.match(page.text, /if\(dom\.needsRender\) render\(\)/);
-		assert.match(page.text, /function captureFocus/);
-		assert.match(page.text, /function restoreFocus/);
-		assert.match(page.text, /data-focus-key/);
-		assert.match(page.text, /restoreFocus\(focus\)/);
-		assert.match(page.text, /function updateActiveQuestionClasses/);
-		assert.doesNotMatch(page.text, /\n    render\(\);\n  \};/);
+		assert.match(bundle, /function applyServerMessage/);
+		assert.match(bundle, /if\(dom\.needsRender\) render\(\)/);
+		assert.match(bundle, /function captureFocus/);
+		assert.match(bundle, /function restoreFocus/);
+		assert.match(bundle, /data-focus-key/);
+		assert.match(bundle, /restoreFocus\(focus\)/);
+		assert.match(bundle, /function updateActiveQuestionClasses/);
+		assert.doesNotMatch(bundle, /\n    render\(\);\n  \};/);
 	} finally {
 		await handle.stop();
 	}
@@ -855,7 +921,7 @@ test("browser focused Other text input is not recreated by stale answer echoes",
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		const decisionOther = document.querySelector('[data-focus-key="q-0-other"]');
@@ -904,7 +970,7 @@ test("browser Other text input sends typed text and survives stale answer echoes
 			setTimeout(fn) { fn(); return 1; },
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		assert.equal(sockets.length, 1);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
@@ -960,7 +1026,7 @@ test("browser Other text input survives unrelated option re-renders before debou
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: otherQuestions, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		const decisionOther = document.querySelector('[data-focus-key="q-0-other"]');
@@ -1011,7 +1077,7 @@ test("focused Other text input value survives direct DOM re-renders", async () =
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 
 		const otherInput = document.querySelector('[data-focus-key="q-0-other"]');
 		assert.ok(otherInput);
@@ -1090,7 +1156,7 @@ test("browser page renders the Submit review tab from TUI tab sync", async () =>
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: {} }, lifecycle: "open" }) });
 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: QUESTIONS.length }) });
@@ -1209,12 +1275,13 @@ test("browser page has semantic progress band with step markers", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /progress-band/);
-		assert.match(page.text, /progress-step/);
-		assert.match(page.text, /progress-info/);
-		assert.match(page.text, /renderProgress/);
-		assert.match(page.text, /Step /);
-		assert.match(page.text, /answered/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /progress-band/);
+		assert.match(bundle, /progress-step/);
+		assert.match(bundle, /progress-info/);
+		assert.match(bundle, /renderProgress/);
+		assert.match(bundle, /Step /);
+		assert.match(bundle, /answered/);
 	} finally {
 		await handle.stop();
 	}
@@ -1224,11 +1291,12 @@ test("browser page uses choice-row structure with selected state", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /choice-row/);
-		assert.match(page.text, /selected/);
-		assert.match(page.text, /label-text/);
-		assert.match(page.text, /choice-desc/);
-		assert.match(page.text, /choice-other-input/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /choice-row/);
+		assert.match(bundle, /selected/);
+		assert.match(bundle, /label-text/);
+		assert.match(bundle, /choice-desc/);
+		assert.match(bundle, /choice-other-input/);
 	} finally {
 		await handle.stop();
 	}
@@ -1238,9 +1306,10 @@ test("browser page has notes-field wrapper with dashed border styling", async ()
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /notes-field/);
-		assert.match(page.text, /Add a note/);
-		assert.match(page.text, /border-style:dashed/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /notes-field/);
+		assert.match(bundle, /Add a note/);
+		assert.match(bundle, /border-style:dashed/);
 	} finally {
 		await handle.stop();
 	}
@@ -1250,13 +1319,14 @@ test("browser review screen uses ledger structure with QUESTION/ANSWER/NOTES lab
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /review-ledger/);
-		assert.match(page.text, /ledger-row/);
-		assert.match(page.text, /ledger-label/);
-		assert.match(page.text, /ledger-answer/);
-		assert.match(page.text, /ledger-note/);
-		assert.match(page.text, /q-num/);
-		assert.match(page.text, /renderReviewLedger/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /review-ledger/);
+		assert.match(bundle, /ledger-row/);
+		assert.match(bundle, /ledger-label/);
+		assert.match(bundle, /ledger-answer/);
+		assert.match(bundle, /ledger-note/);
+		assert.match(bundle, /q-num/);
+		assert.match(bundle, /renderReviewLedger/);
 	} finally {
 		await handle.stop();
 	}
@@ -1266,9 +1336,10 @@ test("browser submitted screen uses receipt structure", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /renderSubmittedReceipt/);
-		assert.match(page.text, /submitted-header/);
-		assert.match(page.text, /submitted-answers/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /renderSubmittedReceipt/);
+		assert.match(bundle, /submitted-header/);
+		assert.match(bundle, /submitted-answers/);
 	} finally {
 		await handle.stop();
 	}
@@ -1297,7 +1368,7 @@ test("browser review ledger renders structured QUESTION/ANSWER/NOTES per questio
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: { note: "my note" } }, lifecycle: "open" }) });
 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: QUESTIONS.length }) });
@@ -1350,7 +1421,7 @@ test("browser submitted receipt has structured layout with answer values", async
 			clearInterval() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: { note: "remember" } }, lifecycle: "open" }) });
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 
@@ -1394,7 +1465,7 @@ test("choice row click toggles checkbox and selects radio", async () => {
 			setTimeout(fn) { fn(); return 1; },
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: multiQs, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		const questionsDiv = document.getElementById("questions");
@@ -1438,7 +1509,7 @@ test("radio row click selects and clears siblings", async () => {
 			setTimeout(fn) { fn(); return 1; },
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		const radioRows = document.querySelectorAll('.choice-row');
@@ -1482,7 +1553,7 @@ test("progress step click exits review mode", async () => {
 			setTimeout() {},
 			clearTimeout() {},
 		});
-		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
 		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
 
 		document.getElementById("submit").onclick();
@@ -1502,13 +1573,14 @@ test("browser page has theme and layout toggle controls", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /theme-toggle/);
-		assert.match(page.text, /layout-toggle/);
-		assert.match(page.text, /toggle-btn/);
-		assert.match(page.text, /controls/);
-		assert.match(page.text, /localStorage/);
-		assert.match(page.text, /pq-theme/);
-		assert.match(page.text, /pq-layout/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /theme-toggle/);
+		assert.match(bundle, /layout-toggle/);
+		assert.match(bundle, /toggle-btn/);
+		assert.match(bundle, /controls/);
+		assert.match(bundle, /localStorage/);
+		assert.match(bundle, /pq-theme/);
+		assert.match(bundle, /pq-layout/);
 	} finally {
 		await handle.stop();
 	}
@@ -1518,11 +1590,12 @@ test("browser page has dark mode CSS variables and data-theme support", async ()
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /data-theme/);
-		assert.match(page.text, /prefers-color-scheme/);
-		assert.match(page.text, /\[data-theme=dark\]/);
-		assert.match(page.text, /--clr-bg/);
-		assert.match(page.text, /--clr-accent/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /data-theme/);
+		assert.match(bundle, /prefers-color-scheme/);
+		assert.match(bundle, /\[data-theme=dark\]/);
+		assert.match(bundle, /--clr-bg/);
+		assert.match(bundle, /--clr-accent/);
 	} finally {
 		await handle.stop();
 	}
@@ -1532,12 +1605,13 @@ test("browser page has single-question mode layout support", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
-		assert.match(page.text, /single-question-mode/);
-		assert.match(page.text, /back-next-controls/);
-		assert.match(page.text, /back-btn/);
-		assert.match(page.text, /next-btn/);
-		assert.match(page.text, /mode-wrapper/);
-		assert.match(page.text, /isSingleMode/);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /single-question-mode/);
+		assert.match(bundle, /back-next-controls/);
+		assert.match(bundle, /back-btn/);
+		assert.match(bundle, /next-btn/);
+		assert.match(bundle, /mode-wrapper/);
+		assert.match(bundle, /isSingleMode/);
 	} finally {
 		await handle.stop();
 	}
