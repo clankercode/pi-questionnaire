@@ -77,6 +77,9 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 		if (typeof raw === "string") {
 			const trimmed = raw.trim();
 			if (trimmed === "") return undefined;
+			// "__other__" is the browser radio sentinel, not user text.
+			// The real typed value must arrive as {mode:"other", text}.
+			if (/^__other__$/i.test(trimmed)) return undefined;
 			if (trimmed === "affirm" || trimmed === CONFIRM_AFFIRM) {
 				return { mode: "option", value: "affirm" };
 			}

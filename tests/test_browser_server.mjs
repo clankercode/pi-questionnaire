@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import vm from "node:vm";
 import { once } from "node:events";
+import { coerceAnswer } from "../src/answers.ts";
 import { normalizeQuestions } from "../src/normalize.ts";
 import { startBrowserSyncServer } from "../src/browser-server.ts";
 
@@ -252,6 +253,11 @@ function scriptFromPage(html) {
 	assert.equal(scripts.length, 1);
 	return scripts[0];
 }
+
+test("confirm_enum sentinel Other value is not accepted as typed Other text", () => {
+	const [question] = normalizeQuestions([{ id: "go", header: "Go", question: "Proceed?", type: "confirm_enum" }]);
+	assert.equal(coerceAnswer("__other__", question), undefined);
+});
 
 test("browser server serves healthz and questionnaire page", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
