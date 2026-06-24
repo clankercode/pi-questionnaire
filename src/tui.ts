@@ -108,16 +108,18 @@ function renderOptionLine(
 	width: number,
 	theme: any,
 	lines: string[],
+	savedSelected: boolean = false,
 ) {
 	const isOther = opt.isOther === true;
+	const checkMark = savedSelected ? theme.fg("accent", "✓") : " ";
 	const head = (() => {
 		if (checked !== undefined) {
 			const arrow = selected ? SELECTOR_ARROW : "   ";
 			const box = checked ? theme.fg("success", "■") : theme.fg("muted", "□");
-			return `${arrow}${box} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
+			return `${arrow}${box} ${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 		}
-		const arrow = selected ? theme.fg("accent", "> ") : "  ";
-		return `${arrow}${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
+		const arrow = selected ? SELECTOR_ARROW : "   ";
+		return `${arrow}${checkMark} ${idx + 1}. ${opt.label}${active ? " ✎" : ""}`;
 	})();
 	addWrappedWithPrefix(lines, "", theme.fg(selected ? "accent" : "text", head), width);
 	if (opt.description) {
@@ -1483,7 +1485,16 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const fakeChecked = showOtherMark ? true : isChecked;
 					const active = isOtherOpt && isOtherChosen;
 					const previewExpanded = expandedPreview[q.id] === i;
-					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, contentWidth, theme, lines);
+					// Determine if this option matches the saved answer (blue checkmark)
+					let savedSelected = false;
+					if (!isOtherOpt && currentValue !== undefined
+						&& typeof currentValue === "object" && currentValue !== null
+						&& !Array.isArray(currentValue)
+						&& (currentValue as { mode?: string }).mode === "option"
+					) {
+						savedSelected = (currentValue as { value?: string }).value?.toLowerCase() === opt.label.toLowerCase();
+					}
+					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, contentWidth, theme, lines, savedSelected);
 					// If Other is chosen, show the committed text on the
 					// next line as a hint.
 					if (isOtherOpt && isOtherChosen) {
