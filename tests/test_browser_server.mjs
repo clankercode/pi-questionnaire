@@ -280,10 +280,13 @@ function createFakeBrowserDom() {
 		element.id = id;
 		document.getElementById("actions").appendChild(element);
 	}
-	for (const id of ["back-btn", "next-btn"]) {
+	const backNext = new FakeElement("div");
+	backNext.id = "back-next";
+	document.getElementById("mode-wrapper").appendChild(backNext);
+	for (const id of ["next-btn", "back-btn"]) {
 		const element = new FakeElement("button");
 		element.id = id;
-		document.getElementById("mode-wrapper").appendChild(element);
+		backNext.appendChild(element);
 	}
 	for (const id of ["theme-toggle", "layout-toggle"]) {
 		const element = new FakeElement("button");
@@ -1650,6 +1653,61 @@ test("browser page has single-question mode layout support", async () => {
 		assert.match(bundle, /next-btn/);
 		assert.match(bundle, /mode-wrapper/);
 		assert.match(bundle, /isSingleMode/);
+		assert.ok(
+			page.text.indexOf('id="next-btn"') < page.text.indexOf('id="back-btn"'),
+			"Next should come before Back in DOM tab order",
+		);
+		assert.match(bundle, /flex-direction:row-reverse/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser dark mode requests dark native control rendering", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const bundle = await browserAssetBundle(page.text, handle.url);
+		assert.match(bundle, /color-scheme:dark/);
+		assert.match(bundle, /color-scheme:light/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser review screen hides single-question Back and Next controls", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const localStorage = createFakeLocalStorage();
+		localStorage.setItem("pq-layout", "single");
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage,
+			window: { matchMedia: () => ({ matches: false, onchange: null }) },
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		document.getElementById("submit").onclick();
+
+		assert.match(document.getElementById("mode-wrapper").className, /review-mode/);
+		assert.equal(document.getElementById("back-next").style.display, "none");
 	} finally {
 		await handle.stop();
 	}
