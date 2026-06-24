@@ -704,10 +704,17 @@ function answerValue(q,i,el){
 }
 function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
+function isTextValueControl(el){
+  if(!el) return false;
+  if(el.tagName === 'TEXTAREA') return true;
+  if(el.tagName !== 'INPUT') return false;
+  return ['text','number','search','email','url','tel','password'].includes(el.type || 'text');
+}
 function captureFocus(){
   const el = document.activeElement;
   if(!el || !el.dataset || !el.dataset.focusKey) return null;
   const focus = { key:el.dataset.focusKey };
+  if(isTextValueControl(el)) focus.value = el.value;
   if(typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number'){
     focus.start = el.selectionStart;
     focus.end = el.selectionEnd;
@@ -718,6 +725,7 @@ function restoreFocus(focus){
   if(!focus) return;
   const el = document.querySelector('[data-focus-key="'+focus.key+'"]');
   if(!el) return;
+  if(typeof focus.value === 'string' && isTextValueControl(el)) el.value = focus.value;
   el.focus({preventScroll:true});
   if(typeof focus.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(focus.start, focus.end);
 }

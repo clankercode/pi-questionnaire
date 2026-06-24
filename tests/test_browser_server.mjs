@@ -634,6 +634,57 @@ test("browser Other text input survives unrelated option re-renders before debou
 	}
 });
 
+test("focused Other text input value survives direct DOM re-renders", async () => {
+	const previewQuestions = normalizeQuestions([
+		{
+			id: "choice",
+			header: "Choice",
+			question: "Choose?",
+			type: "select_one",
+			options: [{ label: "Red", preview: { type: "text", content: "preview" } }],
+		},
+	]);
+	const handle = await startBrowserSyncServer({ questions: previewQuestions, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor() {
+				this.readyState = FakeWebSocket.OPEN;
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+
+		const otherInput = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(otherInput);
+		otherInput.focus();
+		otherInput.value = "Unsynced other text";
+		otherInput.setSelectionRange(9, 9);
+
+		const previewButton = document.querySelector('[data-focus-key="q-0-preview-0"]');
+		assert.ok(previewButton);
+		previewButton.onclick();
+
+		const restoredOtherInput = document.querySelector('[data-focus-key="q-0-other"]');
+		assert.ok(restoredOtherInput);
+		assert.equal(document.activeElement.dataset.focusKey, "q-0-other");
+		assert.equal(restoredOtherInput.value, "Unsynced other text");
+		assert.equal(restoredOtherInput.selectionStart, 9);
+		assert.equal(restoredOtherInput.selectionEnd, 9);
+	} finally {
+		await handle.stop();
+	}
+});
+
 test("browser page inline script is syntactically valid", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
