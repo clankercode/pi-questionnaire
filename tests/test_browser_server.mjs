@@ -156,9 +156,20 @@ function createFakeBrowserDom() {
 			this.className = "";
 			this.classList = new FakeClassList(this);
 			this.value = "";
-			this.textContent = "";
+			this._directText = "";
 			this.selectionStart = 0;
 			this.selectionEnd = 0;
+		}
+		set textContent(value) {
+			this._directText = value;
+			for (const child of this.children) child.detach();
+			this.children = [];
+		}
+		get textContent() {
+			if (this.children.length === 0) return this._directText;
+			let result = this._directText;
+			for (const child of this.children) result += child.textContent;
+			return result;
 		}
 		set id(value) {
 			this._id = value;
@@ -169,6 +180,7 @@ function createFakeBrowserDom() {
 		}
 		set innerHTML(value) {
 			this._innerHTML = value;
+			this._directText = "";
 			for (const child of this.children) child.detach();
 			this.children = [];
 		}
@@ -182,7 +194,7 @@ function createFakeBrowserDom() {
 		}
 		append(...items) {
 			for (const item of items) {
-				if (typeof item === "string") this.textContent += item;
+				if (typeof item === "string") this._directText += item;
 				else this.appendChild(item);
 			}
 		}
@@ -302,7 +314,8 @@ test("browser page treats internal Other sentinel text as unanswered", async () 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: otherQuestions.length }) });
 		const reviewText = document.getElementById("questions").children[0].textContent;
 		assert.doesNotMatch(reviewText, /__other__/);
-		assert.match(reviewText, /Decision: unanswered/);
+		assert.match(reviewText, /Decision/);
+		assert.match(reviewText, /unanswered/);
 	} finally {
 		await handle.stop();
 	}
@@ -516,8 +529,10 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 		]);
 		assert.equal(document.getElementById("submit").textContent, "Confirm Submit");
 		assert.equal(document.getElementById("cancel").textContent, "Back");
-		assert.match(document.getElementById("questions").children[0].textContent, /Submit answers/);
-		assert.match(document.getElementById("questions").children[0].textContent, /Note:   keep   answer spaces/);
+		const reviewContent = document.getElementById("questions").children[0].textContent;
+		assert.match(reviewContent, /Review/);
+		assert.match(reviewContent, /keep   answer spaces/);
+		assert.match(reviewContent, /keep   note spaces/);
 
 		document.getElementById("submit").onclick();
 		assert.deepEqual(sent.at(-1), { type: "submit" });
@@ -641,17 +656,18 @@ test("browser submitted page shows submitted answers and cancelable close timer"
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 
 		const root = document.getElementById("questions");
-		assert.match(root.children[0].textContent, /Questionnaire submitted\./);
-		assert.match(root.children[0].textContent, /1\. Color/);
-		assert.match(root.children[0].textContent, /Answer: Blue/);
-		assert.match(root.children[0].textContent, /2\. Note/);
-		assert.match(root.children[0].textContent, /Answer: done/);
-		assert.match(root.children[0].textContent, /note: remember this/);
+		assert.match(root.children[0].textContent, /Submitted/);
+		const receiptContent = root.textContent;
+		assert.match(receiptContent, /Color/);
+		assert.match(receiptContent, /Blue/);
+		assert.match(receiptContent, /Note/);
+		assert.match(receiptContent, /done/);
+		assert.match(receiptContent, /remember this/);
 		assert.equal(document.getElementById("actions").style.display, "none");
 		assert.match(document.getElementById("auto-close-timer").textContent, /05:00/);
 		assert.ok(intervals.some((interval) => interval.ms === 1000), "submitted view should start a one-second countdown");
 
-		const controls = root.children[1];
+		const controls = root.children[2];
 		const closeNow = controls.children.find((child) => child.textContent === "Close Now");
 		const cancelTimer = controls.children.find((child) => child.textContent === "Cancel timer");
 		assert.ok(closeNow);
@@ -741,8 +757,8 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 		assert.doesNotMatch(overlay.className, /visible/);
 		assert.equal(document.getElementById("status").textContent, "Submitted");
-		assert.equal(document.getElementById("questions").children.length, 2);
-		assert.match(document.getElementById("questions").children[0].textContent, /Questionnaire submitted/);
+		assert.equal(document.getElementById("questions").children.length, 3);
+		assert.match(document.getElementById("questions").children[0].textContent, /Submitted/);
 		assert.equal(document.getElementById("actions").style.display, "none");
 	} finally {
 		await handle.stop();
@@ -1032,9 +1048,12 @@ test("browser page renders the Submit review tab from TUI tab sync", async () =>
 		const root = document.getElementById("questions");
 		assert.equal(root.children.length, 1);
 		assert.match(root.children[0].className, /submit-review/);
-		assert.match(root.children[0].textContent, /Submit answers/);
-		assert.match(root.children[0].textContent, /Color: Blue/);
-		assert.match(root.children[0].textContent, /Note: done/);
+		const reviewContent = root.children[0].textContent;
+		assert.match(reviewContent, /Review/);
+		assert.match(reviewContent, /Color/);
+		assert.match(reviewContent, /Blue/);
+		assert.match(reviewContent, /Note/);
+		assert.match(reviewContent, /done/);
 	} finally {
 		await handle.stop();
 	}
@@ -1132,6 +1151,169 @@ test("empty number answers clear stale state instead of coercing to zero", async
 		]);
 	} finally {
 		client?.close();
+		await handle.stop();
+	}
+});
+
+test("browser page has semantic progress band with step markers", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /progress-band/);
+		assert.match(page.text, /progress-step/);
+		assert.match(page.text, /progress-info/);
+		assert.match(page.text, /renderProgress/);
+		assert.match(page.text, /Step /);
+		assert.match(page.text, /answered/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page uses choice-row structure with selected state", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /choice-row/);
+		assert.match(page.text, /selected/);
+		assert.match(page.text, /label-text/);
+		assert.match(page.text, /choice-desc/);
+		assert.match(page.text, /choice-other-input/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser page has notes-field wrapper with dashed border styling", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /notes-field/);
+		assert.match(page.text, /Add a note/);
+		assert.match(page.text, /border-style:dashed/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser review screen uses ledger structure with QUESTION/ANSWER/NOTES labels", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /review-ledger/);
+		assert.match(page.text, /ledger-row/);
+		assert.match(page.text, /ledger-label/);
+		assert.match(page.text, /ledger-answer/);
+		assert.match(page.text, /ledger-note/);
+		assert.match(page.text, /q-num/);
+		assert.match(page.text, /renderReviewLedger/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser submitted screen uses receipt structure", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		assert.match(page.text, /renderSubmittedReceipt/);
+		assert.match(page.text, /submitted-header/);
+		assert.match(page.text, /submitted-answers/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser review ledger renders structured QUESTION/ANSWER/NOTES per question", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: { note: "my note" } }, lifecycle: "open" }) });
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: QUESTIONS.length }) });
+
+		const root = document.getElementById("questions");
+		const text = root.textContent;
+		assert.match(text, /QUESTION/);
+		assert.match(text, /ANSWER/);
+		assert.match(text, /NOTES/);
+		assert.match(text, /1\. Color/);
+		assert.match(text, /Pick a color/);
+		assert.match(text, /Blue/);
+		assert.match(text, /2\. Note/);
+		assert.match(text, /Anything else/);
+		assert.match(text, /done/);
+		assert.match(text, /my note/);
+
+		const ledgerLabels = root.findAll(el => el.className === 'ledger-label');
+		const labelTexts = ledgerLabels.map(el => el.textContent);
+		assert.ok(labelTexts.includes('QUESTION'), 'should have QUESTION labels');
+		assert.ok(labelTexts.includes('ANSWER'), 'should have ANSWER labels');
+		assert.ok(labelTexts.includes('NOTES'), 'should have NOTES labels');
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser submitted receipt has structured layout with answer values", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			window: { close() {} },
+			setInterval() {},
+			setTimeout() {},
+			clearInterval() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 0, answers: { "0": { mode: "option", value: "Blue" }, "1": "done" }, options: { notes: { note: "remember" } }, lifecycle: "open" }) });
+		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
+
+		const root = document.getElementById("questions");
+		assert.equal(root.children[0].tagName, 'H2');
+		assert.equal(root.children[0].textContent, 'Submitted');
+		const container = root.children[1];
+		assert.match(container.className, /submitted-answers/);
+		const text = container.textContent;
+		assert.match(text, /Blue/);
+		assert.match(text, /done/);
+		assert.match(text, /remember/);
+		const controls = root.children[2];
+		assert.match(controls.className, /terminal-actions/);
+	} finally {
 		await handle.stop();
 	}
 });

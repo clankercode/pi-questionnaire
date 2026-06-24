@@ -533,13 +533,99 @@ function renderBrowserPage(state: BrowserSyncServerInternal): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AskUserQuestion</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.45;color:#17202a;background:#fafafa}
-.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap;background:#fbfcff}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions,.terminal-actions{display:flex;gap:.75rem;margin:1rem 0;align-items:center;flex-wrap:wrap}.timer{font-weight:600}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
+*,*::before,*::after{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:0 auto;padding:2rem 2rem 4rem;line-height:1.6;color:#1a1a2e;background:#fff}
+
+/* === Header === */
+.header{margin-bottom:2rem}
+.header h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin:0 0 .25rem;color:#1a1a2e}
+.header .status-text{font-size:.875rem;color:#64748b;margin:0}
+
+/* === Progress Band === */
+.progress-band{display:flex;align-items:center;gap:.5rem;margin-bottom:2.5rem;padding-bottom:1.25rem;border-bottom:1px solid #e2e8f0}
+.progress-step{width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:.8125rem;font-weight:600;cursor:pointer;transition:all .15s;border:2px solid #cbd5e1;color:#94a3b8;background:transparent}
+.progress-step.answered{border-color:#4361ee;color:#4361ee;background:#eff3ff}
+.progress-step.active{border-color:#4361ee;color:#fff;background:#4361ee}
+.progress-step.review{border-color:#64748b;color:#64748b;font-size:.6875rem}
+.progress-step.review.active{border-color:#4361ee;color:#fff;background:#4361ee}
+.progress-info{margin-left:auto;font-size:.8125rem;color:#64748b}
+.progress-info strong{color:#1a1a2e}
+
+/* === Question Sections (document rhythm) === */
+.question{position:relative;padding:1.5rem 0 1.5rem 2.5rem;border-bottom:1px solid #f1f5f9}
+.question:last-child{border-bottom:none}
+.question .q-number{position:absolute;left:0;top:1.5rem;width:1.75rem;text-align:right;font-size:1.5rem;font-weight:700;color:#e2e8f0;line-height:1}
+.question.active .q-number{color:#4361ee}
+.question h2{font-size:1.125rem;font-weight:600;margin:0 0 .25rem;color:#1a1a2e}
+.question.active h2{text-decoration:underline;text-decoration-color:#4361ee;text-underline-offset:4px;text-decoration-thickness:2px}
+.question>p{margin:0 0 1rem;color:#475569;font-size:.9375rem}
+.question.active{background:linear-gradient(to right,#f0f4ff 0,#f0f4ff 3px,transparent 3px)}
+.question:not(.active){opacity:.7}
+.question:not(.active):hover{opacity:.9}
+
+/* === Fieldset / Choices === */
+fieldset{border:0;padding:0;margin:0 0 1rem}
+.choice-row{display:flex;align-items:center;gap:.625rem;padding:.625rem .75rem;margin-bottom:.375rem;border-left:3px solid transparent;border-radius:2px;cursor:pointer;transition:background .1s}
+.choice-row:hover{background:#f8fafc}
+.choice-row.selected{border-left-color:#4361ee;background:#f0f4ff}
+.choice-row input[type=radio],.choice-row input[type=checkbox]{accent-color:#4361ee;width:1.125rem;height:1.125rem;flex-shrink:0}
+.choice-row label-text{font-size:.9375rem;color:#1a1a2e}
+.choice-desc{font-size:.8125rem;color:#64748b;margin-left:1.75rem;margin-top:-.125rem;margin-bottom:.375rem}
+.choice-other-input{margin-left:1.75rem;margin-top:.25rem;max-width:24rem}
+.preview-toggle{font-size:.8125rem;color:#4361ee;background:none;border:none;cursor:pointer;padding:.25rem .5rem;margin-left:1.75rem}
+.preview-toggle:hover{text-decoration:underline}
+
+/* === Inputs === */
+input[type=text],input[type=number],textarea{font-family:inherit;font-size:.9375rem;padding:.5rem .75rem;border:1px solid #cbd5e1;border-radius:2px;width:100%;max-width:32rem;transition:border-color .15s}
+input[type=text]:focus,input[type=number]:focus,textarea:focus{outline:none;border-color:#4361ee;box-shadow:0 0 0 3px rgba(67,97,238,.12)}
+textarea{resize:vertical;min-height:2.5rem}
+
+/* === Notes === */
+.notes-field{margin-top:.75rem}
+.notes-field textarea{border-style:dashed;border-color:#e2e8f0;font-size:.8125rem;color:#64748b;max-width:32rem}
+.notes-field textarea:focus{border-style:solid;border-color:#4361ee;color:#1a1a2e}
+.notes-field textarea::placeholder{font-style:italic;color:#94a3b8}
+
+/* === Preview === */
+.preview{margin:.5rem 0 .75rem;padding:.75rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;white-space:pre-wrap;font-size:.875rem}
+
+/* === Actions === */
+.actions{display:flex;gap:.75rem;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #e2e8f0}
+.actions button,.terminal-actions button{font-family:inherit;font-size:.875rem;font-weight:500;padding:.5rem 1.25rem;border:1px solid #cbd5e1;border-radius:2px;background:#fff;color:#1a1a2e;cursor:pointer;transition:all .15s}
+.actions button:hover,.terminal-actions button:hover{border-color:#4361ee;color:#4361ee}
+.actions #submit,.terminal-actions .primary-btn{background:#4361ee;border-color:#4361ee;color:#fff}
+.actions #submit:hover,.terminal-actions .primary-btn:hover{background:#3451d1}
+
+/* === Review Ledger === */
+.review-ledger{width:100%;border-collapse:collapse}
+.review-ledger .ledger-row{border-bottom:1px solid #f1f5f9;padding:.875rem 0}
+.review-ledger .ledger-row:last-child{border-bottom:none}
+.review-ledger .q-num{font-size:.75rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.375rem}
+.review-ledger .ledger-label{font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-bottom:.125rem}
+.review-ledger .ledger-value{font-size:.9375rem;color:#1a1a2e;margin-bottom:.5rem}
+.review-ledger .ledger-answer{font-size:.9375rem;color:#4361ee;font-weight:500}
+.review-ledger .ledger-note{font-size:.8125rem;color:#64748b;font-style:italic}
+.review-ledger .ledger-empty{color:#cbd5e1}
+
+/* === Submitted Receipt === */
+.submitted-header{font-size:1.375rem;font-weight:700;color:#1a1a2e;margin:0 0 .5rem;padding-bottom:.75rem;border-bottom:2px solid #4361ee}
+.submitted-answers{margin-top:1.5rem}\n.terminal-actions{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0}
+.timer{font-family:ui-monospace,monospace;font-size:.875rem;font-weight:600;color:#4361ee}
+
+/* === Overlay === */
+.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.92);font-size:1.125rem;color:#64748b;z-index:100}
+.overlay.visible{display:flex}
+
+/* === Cancelled === */
+.terminal-text{font-size:1.125rem;color:#64748b;padding:2rem 0}
 </style>
 </head>
 <body>
+<div class="header">
 <h1>AskUserQuestion</h1>
-<p id="status" class="muted">Connecting...</p>
+<p id="status" class="status-text">Connecting...</p>
+</div>
+<div id="progress" class="progress-band"></div>
 <div id="questions"></div>
 <div id="actions" class="actions"><button id="submit">Submit</button><button id="cancel">Cancel</button></div>
 <div id="overlay" class="overlay">Connecting to TUI...</div>
@@ -630,7 +716,34 @@ function setOverlayPending(pending, text){
 function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
 function setActionsVisible(visible){ document.getElementById('actions').style.display = visible ? '' : 'none'; }
 function updateActionLabels(){ const reviewing = isReviewTab(); document.getElementById('submit').textContent = reviewing ? 'Confirm Submit' : 'Submit'; document.getElementById('cancel').textContent = reviewing ? 'Back' : 'Cancel'; }
-function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); }
+function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); renderProgress(); }
+function answeredCount(){ let n=0; state.questions.forEach((_,i)=>{ if(currentAnswer(i) !== undefined) n++; }); return n; }
+function renderProgress(){
+  const bar = document.getElementById('progress'); if(!bar) return;
+  bar.innerHTML = '';
+  const isReview = isReviewTab();
+  const total = state.questions.length;
+  const answered = answeredCount();
+  state.questions.forEach((_,i)=>{
+    const btn = document.createElement('button'); btn.type='button';
+    btn.className = 'progress-step' + (i === state.currentTab && !isReview ? ' active' : '') + (currentAnswer(i) !== undefined ? ' answered' : '');
+    btn.textContent = String(i+1);
+    btn.onclick = ()=> setTab(i);
+    bar.appendChild(btn);
+  });
+  if(total >= 2){
+    const rev = document.createElement('button'); rev.type='button';
+    rev.className = 'progress-step review' + (isReview ? ' active' : '');
+    rev.textContent = '\u2713';
+    rev.title = 'Review';
+    rev.onclick = ()=> showSubmitReview();
+    bar.appendChild(rev);
+  }
+  const info = document.createElement('span'); info.className = 'progress-info';
+  if(isReview){ info.innerHTML = '<strong>Review</strong> &middot; ' + answered + ' of ' + total + ' answered'; }
+  else { info.innerHTML = '<strong>Step '+(state.currentTab+1)+' / '+total+'</strong> &middot; ' + answered + ' answered'; }
+  bar.appendChild(info);
+}
 function send(message){ if(message && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
 function pendingKey(message){ return message.type === 'answer' ? 'answer:'+message.questionId : message.type; }
 function queuePending(message){
@@ -789,32 +902,65 @@ function displayAnswerValue(value){
   }
   return String(value);
 }
-function submitReviewText(){
-  const lines = ['Submit answers', '', 'Review your answers, then choose Confirm Submit or Back.', ''];
+function renderReviewLedger(root){
+  const desc = document.createElement('p'); desc.className = 'muted'; desc.style.cssText = 'color:#64748b;margin:0 0 1.25rem;font-size:.9375rem';
+  desc.textContent = 'Review your answers, then choose Confirm Submit or Back.';
+  root.appendChild(desc);
+  const table = document.createElement('div'); table.className = 'review-ledger';
   state.questions.forEach((q,i)=>{
-    lines.push(q.header+': '+displayAnswerValue(currentAnswer(i)));
+    const row = document.createElement('div'); row.className = 'ledger-row';
+    const num = document.createElement('div'); num.className = 'q-num'; num.textContent = (i+1) + '. ' + q.header;
+    row.appendChild(num);
+    const qLabel = document.createElement('div'); qLabel.className = 'ledger-label'; qLabel.textContent = 'QUESTION';
+    const qVal = document.createElement('div'); qVal.className = 'ledger-value'; qVal.textContent = q.question;
+    row.append(qLabel, qVal);
+    const aLabel = document.createElement('div'); aLabel.className = 'ledger-label'; aLabel.textContent = 'ANSWER';
+    const aVal = document.createElement('div'); aVal.className = 'ledger-answer';
+    const ans = displayAnswerValue(currentAnswer(i));
+    aVal.textContent = ans;
+    if(ans === 'unanswered') aVal.classList.add('ledger-empty');
+    row.append(aLabel, aVal);
     const note = (state.options.notes || {})[q.id];
-    if(note) lines.push('  note: '+note);
+    if(note){
+      const nLabel = document.createElement('div'); nLabel.className = 'ledger-label'; nLabel.textContent = 'NOTES';
+      const nVal = document.createElement('div'); nVal.className = 'ledger-note'; nVal.textContent = note;
+      row.append(nLabel, nVal);
+    }
+    table.appendChild(row);
   });
-  return lines.join('\\n');
+  root.appendChild(table);
 }
-function submittedAnswersText(){
-  const lines = ['Questionnaire submitted.', '', 'Submitted answers:', ''];
+function renderSubmittedReceipt(root){
+  const hdr = document.createElement('h2'); hdr.className = 'submitted-header'; hdr.textContent = 'Submitted';
+  root.appendChild(hdr);
+  const container = document.createElement('div'); container.className = 'submitted-answers';
+  const table = document.createElement('div'); table.className = 'review-ledger';
   state.questions.forEach((q,i)=>{
-    lines.push((i + 1)+'. '+q.header);
-    lines.push('   Question: '+q.question);
-    lines.push('   Answer: '+displayAnswerValue(currentAnswer(i)));
+    const row = document.createElement('div'); row.className = 'ledger-row';
+    const num = document.createElement('div'); num.className = 'q-num'; num.textContent = (i+1) + '. ' + q.header;
+    row.appendChild(num);
+    const qLabel = document.createElement('div'); qLabel.className = 'ledger-label'; qLabel.textContent = 'QUESTION';
+    const qVal = document.createElement('div'); qVal.className = 'ledger-value'; qVal.textContent = q.question;
+    row.append(qLabel, qVal);
+    const aLabel = document.createElement('div'); aLabel.className = 'ledger-label'; aLabel.textContent = 'ANSWER';
+    const aVal = document.createElement('div'); aVal.className = 'ledger-answer';
+    const ans = displayAnswerValue(currentAnswer(i));
+    aVal.textContent = ans;
+    if(ans === 'unanswered') aVal.classList.add('ledger-empty');
+    row.append(aLabel, aVal);
     const note = (state.options.notes || {})[q.id];
-    if(note) lines.push('   note: '+note);
-    lines.push('');
+    if(note){
+      const nLabel = document.createElement('div'); nLabel.className = 'ledger-label'; nLabel.textContent = 'NOTES';
+      const nVal = document.createElement('div'); nVal.className = 'ledger-note'; nVal.textContent = note;
+      row.append(nLabel, nVal);
+    }
+    table.appendChild(row);
   });
-  return lines.join('\\n').trimEnd();
+  container.appendChild(table);
+  root.appendChild(container);
 }
 function renderSubmittedTerminal(root){
-  const section = document.createElement('section');
-  section.className = 'question active submit-review terminal-submitted';
-  section.textContent = submittedAnswersText();
-  root.appendChild(section);
+  renderSubmittedReceipt(root);
   const controls = document.createElement('div');
   controls.className = 'terminal-actions';
   const timer = document.createElement('span');
@@ -822,6 +968,7 @@ function renderSubmittedTerminal(root){
   timer.className = 'timer';
   timer.textContent = autoCloseTimerText();
   const closeNow = document.createElement('button');
+  closeNow.className = 'primary-btn';
   closeNow.type = 'button';
   closeNow.textContent = 'Close Now';
   closeNow.onclick = closeBrowserTab;
@@ -838,12 +985,13 @@ function renderSubmittedTerminal(root){
 function renderTerminal(root){
   setActionsVisible(false);
   if(state.lifecycle === 'submitted') renderSubmittedTerminal(root);
-  else { stopAutoCloseTimer(); root.textContent = terminalText(); }
+  else { stopAutoCloseTimer(); const p = document.createElement('p'); p.className = 'terminal-text'; p.textContent = terminalText(); root.appendChild(p); }
 }
 function render(){
   const focus = captureFocus();
   const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
   updateLifecycleOverlay();
+  renderProgress();
   if(terminalLifecycle || state.lifecycle !== 'open'){
     renderTerminal(root);
     return;
@@ -853,14 +1001,18 @@ function render(){
   if(isReviewTab()){
     const section = document.createElement('section');
     section.className = 'question active submit-review';
-    section.textContent = submitReviewText();
+    renderReviewLedger(section);
     root.appendChild(section);
     restoreFocus(focus);
     return;
   }
   state.questions.forEach((q,i)=>{
     const section = document.createElement('section'); section.className = 'question' + (i === state.currentTab ? ' active' : '');
-    section.innerHTML = '<h2>'+escapeHtml(q.header)+'</h2><p>'+escapeHtml(q.question)+'</p>';
+    const num = document.createElement('span'); num.className = 'q-number'; num.textContent = String(i+1);
+    section.appendChild(num);
+    const h2 = document.createElement('h2'); h2.textContent = q.header;
+    const p = document.createElement('p'); p.textContent = q.question;
+    section.append(h2, p);
     section.onclick = () => activateQuestion(i);
     const fieldset = document.createElement('fieldset');
     const opts = state.renderOptions[String(i)] || q.options || [];
@@ -880,26 +1032,29 @@ function render(){
       fieldset.appendChild(input);
     }
     section.appendChild(fieldset);
-    const notes = document.createElement('textarea'); notes.placeholder = 'Notes'; notes.value = (state.options.notes || {})[q.id] || '';
+    const notesWrap = document.createElement('div'); notesWrap.className = 'notes-field';
+    const notes = document.createElement('textarea'); notes.placeholder = 'Add a note...'; notes.value = (state.options.notes || {})[q.id] || '';
     notes.dataset.focusKey = 'q-'+i+'-notes';
     notes.onfocus = () => activateQuestion(i);
     notes.oninput = () => { activateQuestion(i); const next = {...(state.options.notes || {}), [q.id]: notes.value}; state.options.notes = next; sendDebounced({type:'options', options:{notes:next}}); };
-    section.appendChild(notes);
+    notesWrap.appendChild(notes);
+    section.appendChild(notesWrap);
     root.appendChild(section);
   });
   restoreFocus(focus);
 }
 function addChoice(parent,q,i,opt,j,kind){
-  const label = document.createElement('label'); label.className = 'row';
+  const row = document.createElement('div'); row.className = 'choice-row' + (isChoiceChecked(q,i,opt) ? ' selected' : '');
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
   input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
-  input.onchange = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); };
-  label.appendChild(input); label.append(' '+opt.label);
-  parent.appendChild(label);
-  if(opt.description){ const d=document.createElement('div'); d.className='muted'; d.textContent=opt.description; parent.appendChild(d); }
-  if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
-  if(opt.isOther){ const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); }; parent.appendChild(other); }
+  input.onchange = () => { activateQuestion(i); const value = answerValue(q,i,input); setLocalAnswer(i,value); send({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', input.checked); };
+  const labelText = document.createElement('span'); labelText.className = 'label-text'; labelText.textContent = opt.label;
+  row.append(input, labelText);
+  parent.appendChild(row);
+  if(opt.description){ const d=document.createElement('div'); d.className='choice-desc'; d.textContent=opt.description; parent.appendChild(d); }
+  if(opt.preview){ const key=q.id+':'+j; input.dataset.previewKey = key; const b=document.createElement('button'); b.type='button'; b.className='preview-toggle'; b.textContent=expanded.has(key)?'Hide preview':'Show preview'; b.dataset.previewKey = key; b.dataset.focusKey = 'q-'+i+'-preview-'+j; b.onclick=()=>{ activateQuestion(i); expanded.has(key)?expanded.delete(key):expanded.add(key); render();}; parent.appendChild(b); if(expanded.has(key)) renderPreview(parent,opt.preview); }
+  if(opt.isOther){ const otherWrap = document.createElement('div'); otherWrap.className = 'choice-other-input'; const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); sendDebounced({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', !!other.value); }; otherWrap.appendChild(other); parent.appendChild(otherWrap); }
 }
 function renderPreview(parent,preview){
   const box=document.createElement('div'); box.className='preview preview-'+preview.type;
