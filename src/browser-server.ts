@@ -679,7 +679,7 @@ function answerValue(q,i,el){
   if(q.type === 'confirm_enum'){
     const otherInput = document.getElementById('other-'+i);
     if(el.value === '__other__') return otherInput && otherInput.value ? {mode:'other', text:otherInput.value} : null;
-    return {mode:'option', value:el.value};
+    return {mode:'option', value: el.value.toLowerCase() === 'affirm' ? 'affirm' : 'decline'};
   }
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
