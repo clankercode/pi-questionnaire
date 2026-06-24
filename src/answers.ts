@@ -22,6 +22,10 @@ import type {
 } from "./types.ts";
 import { CONFIRM_AFFIRM, CONFIRM_DECLINE, isChoiceType, OTHER_LABEL } from "./types.ts";
 
+function isOtherSentinelText(value: string): boolean {
+	return /^__other__$/i.test(value.trim());
+}
+
 /** Coerce a raw input value (from JSON / WS / env) into an AnswerValue.
  * Returns undefined if the value can't be coerced. */
 export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | undefined {
@@ -31,8 +35,8 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 		if (typeof raw === "string") {
 			const trimmed = raw.trim();
 			if (trimmed === "") return undefined;
-			// Map "__other__" or "other" with empty text to undefined
-			if (/^__other__$/i.test(trimmed)) return undefined;
+			// Map the browser radio sentinel to undefined; it is not user text.
+			if (isOtherSentinelText(trimmed)) return undefined;
 			// If matches an option label, return option mode
 			if (q.options?.some((o) => o.label === trimmed)) {
 				return { mode: "option", value: trimmed };
@@ -47,13 +51,16 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 				return { mode: "option", value: obj.value };
 			}
 			if (obj.mode === "other" && typeof obj.text === "string") {
+				if (isOtherSentinelText(obj.text)) return undefined;
 				return { mode: "other", text: obj.text };
 			}
 			// pag-server nested shape: { selected, other }
 			if (typeof obj.label === "string" && typeof obj.text === "string") {
-				return obj.label === OTHER_LABEL
-					? { mode: "other", text: obj.text }
-					: { mode: "option", value: obj.label };
+				if (obj.label === OTHER_LABEL) {
+					if (isOtherSentinelText(obj.text)) return undefined;
+					return { mode: "other", text: obj.text };
+				}
+				return { mode: "option", value: obj.label };
 			}
 		}
 		return undefined;
@@ -79,7 +86,7 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 			if (trimmed === "") return undefined;
 			// "__other__" is the browser radio sentinel, not user text.
 			// The real typed value must arrive as {mode:"other", text}.
-			if (/^__other__$/i.test(trimmed)) return undefined;
+			if (isOtherSentinelText(trimmed)) return undefined;
 			if (trimmed === "affirm" || trimmed === CONFIRM_AFFIRM) {
 				return { mode: "option", value: "affirm" };
 			}
@@ -99,6 +106,7 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 				if (v === "affirm" || v === "decline") return { mode: "option", value: v };
 			}
 			if (obj.mode === "other" && typeof obj.text === "string") {
+				if (isOtherSentinelText(obj.text)) return undefined;
 				return { mode: "other", text: obj.text };
 			}
 		}

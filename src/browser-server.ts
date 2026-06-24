@@ -534,7 +534,7 @@ function renderBrowserPage(state: BrowserSyncServerInternal): string {
 <title>AskUserQuestion</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.45;color:#17202a;background:#fafafa}
-.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions{display:flex;gap:.75rem;margin:1rem 0}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
+.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap;background:#fbfcff}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions{display:flex;gap:.75rem;margin:1rem 0}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
 </style>
 </head>
 <body>
@@ -554,6 +554,7 @@ let reconnectTimer;
 let reconnectDelay = 500;
 let terminalLifecycle = state.lifecycle !== 'open';
 let awaitingState = !terminalLifecycle;
+let reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, state.currentTab));
 function connect(){
   if(terminalLifecycle) return;
   clearTimeout(reconnectTimer);
@@ -588,8 +589,8 @@ function applyLifecycle(lifecycle){
 function applyServerMessage(message){
   const dom = { needsRender:false, needsActiveUpdate:false };
   if(message.type === 'state'){
-    if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; dom.needsRender = true; }
-    if(state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
+    if(!sameJson(state.questions, message.questions || [])){ state.questions = message.questions || []; reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); dom.needsRender = true; }
+    if(state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; if(state.currentTab < state.questions.length) reviewReturnTab = state.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
     const nextAnswers = protectFocusedAnswer(message.answers || {});
     if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
     const nextOptions = protectFocusedOptions(message.options || {notes:{}});
@@ -598,7 +599,7 @@ function applyServerMessage(message){
     if(applyLifecycle(message.lifecycle)) dom.needsRender = true;
     return dom;
   }
-  if(message.type === 'tab' && state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
+  if(message.type === 'tab' && state.currentTab !== message.currentTab){ const wasSubmit = state.currentTab === state.questions.length; state.currentTab = message.currentTab; if(state.currentTab < state.questions.length) reviewReturnTab = state.currentTab; dom.needsRender = wasSubmit || state.currentTab === state.questions.length; dom.needsActiveUpdate = !dom.needsRender; }
   if(message.type === 'answers'){
     const nextAnswers = protectFocusedAnswer(message.answers || {});
     if(!sameJson(state.answers, nextAnswers)){ state.answers = nextAnswers; dom.needsRender = true; }
@@ -621,6 +622,7 @@ function setOverlayPending(pending, text){
 }
 function updateLifecycleOverlay(){ document.getElementById('overlay').classList.toggle('visible', awaitingState && !terminalLifecycle); }
 function setActionsVisible(visible){ document.getElementById('actions').style.display = visible ? '' : 'none'; }
+function updateActionLabels(){ const reviewing = isReviewTab(); document.getElementById('submit').textContent = reviewing ? 'Confirm Submit' : 'Submit'; document.getElementById('cancel').textContent = reviewing ? 'Back' : 'Cancel'; }
 function updateActiveQuestionClasses(){ document.querySelectorAll('#questions .question').forEach((section,i)=>section.classList.toggle('active', i === state.currentTab)); }
 function send(message){ if(message && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); }
 function pendingKey(message){ return message.type === 'answer' ? 'answer:'+message.questionId : message.type; }
@@ -659,7 +661,8 @@ function protectFocusedOptions(options){
 }
 function currentAnswer(i){ return state.answers[String(i)]; }
 function optionValue(opt){ return opt.isOther ? '__other__' : opt.label; }
-function isOtherAnswer(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'other'; }
+function isOtherSentinelText(text){ return String(text || '').trim().toLowerCase() === '__other__'; }
+function isOtherAnswer(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'other' && !isOtherSentinelText(answer.text); }
 function choiceValue(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'option' ? answer.value : undefined; }
 function isChoiceChecked(q,i,opt){
   const answer = currentAnswer(i);
@@ -682,7 +685,7 @@ function otherTextValue(q,i,el){
 }
 function otherAnswerValue(q,i,el){
   const text = otherTextValue(q,i,el);
-  return text ? {mode:'other', text} : null;
+  return text && !isOtherSentinelText(text) ? {mode:'other', text} : null;
 }
 function answerValue(q,i,el){
   if(q.type === 'select_one'){
@@ -702,7 +705,12 @@ function answerValue(q,i,el){
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
 }
-function setTab(i){ state.currentTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
+function setTab(i){ state.currentTab = i; if(i < state.questions.length) reviewReturnTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
+function isReviewTab(){ return state.currentTab === state.questions.length; }
+function reviewBackTab(){ return Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); }
+function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); setTab(state.questions.length); render(); }
+function returnFromSubmitReview(){ setTab(reviewBackTab()); render(); }
+function confirmSubmit(){ flushDebounced(); send({type:'submit'}); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function isTextValueControl(el){
   if(!el) return false;
@@ -735,13 +743,13 @@ function displayAnswerValue(value){
   if(Array.isArray(value)) return value.map(displayAnswerValue).join(', ');
   if(value && typeof value === 'object'){
     if(value.mode === 'option') return String(value.value);
-    if(value.mode === 'other') return '(Other) '+String(value.text || '');
+    if(value.mode === 'other') return isOtherSentinelText(value.text) ? 'unanswered' : '(Other) '+String(value.text || '');
     return JSON.stringify(value);
   }
   return String(value);
 }
 function submitReviewText(){
-  const lines = ['Submit answers', '', 'Review your answers, then use Submit or Cancel.', ''];
+  const lines = ['Submit answers', '', 'Review your answers, then choose Confirm Submit or Back.', ''];
   state.questions.forEach((q,i)=>{
     lines.push(q.header+': '+displayAnswerValue(currentAnswer(i)));
     const note = (state.options.notes || {})[q.id];
@@ -759,7 +767,8 @@ function render(){
     return;
   }
   setActionsVisible(true);
-  if(state.currentTab === state.questions.length){
+  updateActionLabels();
+  if(isReviewTab()){
     const section = document.createElement('section');
     section.className = 'question active submit-review';
     section.textContent = submitReviewText();
@@ -834,8 +843,8 @@ function renderMarkdown(markdown){
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
-document.getElementById('submit').onclick = () => { flushDebounced(); send({type:'submit'}); };
-document.getElementById('cancel').onclick = () => send({type:'cancel'});
+document.getElementById('submit').onclick = () => { if(isReviewTab()) confirmSubmit(); else if(state.questions.length >= 2) showSubmitReview(); else confirmSubmit(); };
+document.getElementById('cancel').onclick = () => { if(isReviewTab()) returnFromSubmitReview(); else send({type:'cancel'}); };
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);
 </script>

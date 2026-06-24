@@ -257,6 +257,55 @@ function scriptFromPage(html) {
 test("confirm_enum sentinel Other value is not accepted as typed Other text", () => {
 	const [question] = normalizeQuestions([{ id: "go", header: "Go", question: "Proceed?", type: "confirm_enum" }]);
 	assert.equal(coerceAnswer("__other__", question), undefined);
+	assert.equal(coerceAnswer({ mode: "other", text: "__other__" }, question), undefined);
+});
+
+
+test("browser page treats internal Other sentinel text as unanswered", async () => {
+	const otherQuestions = normalizeQuestions([
+		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
+	]);
+	const handle = await startBrowserSyncServer({
+		questions: otherQuestions,
+		initialAnswers: { "0": { mode: "other", text: "__other__" } },
+		preferredPort: 0,
+	});
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+
+		const otherInput = document.querySelector('[data-focus-key="q-0-other"]');
+		const otherRadio = document.querySelector('[data-focus-key="q-0-choice-2"]');
+		assert.ok(otherInput);
+		assert.ok(otherRadio);
+		assert.equal(otherInput.value, "");
+		assert.equal(otherRadio.checked, false);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "tab", currentTab: otherQuestions.length }) });
+		const reviewText = document.getElementById("questions").children[0].textContent;
+		assert.doesNotMatch(reviewText, /__other__/);
+		assert.match(reviewText, /Decision: unanswered/);
+	} finally {
+		await handle.stop();
+	}
 });
 
 test("browser server serves healthz and questionnaire page", async () => {
@@ -418,7 +467,7 @@ test("browser page protects focused answer and notes from stale websocket echoes
 	}
 });
 
-test("browser page flushes pending answer and notes before submit", async () => {
+test("browser page flushes pending answer and notes before confirm submit", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
@@ -463,8 +512,91 @@ test("browser page flushes pending answer and notes before submit", async () => 
 		assert.deepEqual(sent.slice(-3), [
 			{ type: "answer", questionId: "note", value: "  keep   answer spaces  " },
 			{ type: "options", options: { notes: { note: "  keep   note spaces  " } } },
-			{ type: "submit" },
+			{ type: "tab", currentTab: QUESTIONS.length },
 		]);
+		assert.equal(document.getElementById("submit").textContent, "Confirm Submit");
+		assert.equal(document.getElementById("cancel").textContent, "Back");
+		assert.match(document.getElementById("questions").children[0].textContent, /Submit answers/);
+		assert.match(document.getElementById("questions").children[0].textContent, /Note:   keep   answer spaces/);
+
+		document.getElementById("submit").onclick();
+		assert.deepEqual(sent.at(-1), { type: "submit" });
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser confirm screen Back returns to the previous question view", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({ type: "state", questions: QUESTIONS, currentTab: 1, answers: {}, options: { notes: {} }, lifecycle: "open" }) });
+
+		document.getElementById("submit").onclick();
+		document.getElementById("cancel").onclick();
+
+		assert.deepEqual(sent.slice(-2), [
+			{ type: "tab", currentTab: QUESTIONS.length },
+			{ type: "tab", currentTab: 1 },
+		]);
+		assert.equal(document.getElementById("submit").textContent, "Submit");
+		assert.equal(document.getElementById("cancel").textContent, "Cancel");
+		assert.equal(document.getElementById("questions").children.length, QUESTIONS.length);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser single-question submit remains immediate", async () => {
+	const [question] = QUESTIONS;
+	const handle = await startBrowserSyncServer({ questions: [question], preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor() {
+				this.readyState = FakeWebSocket.OPEN;
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+
+		document.getElementById("submit").onclick();
+
+		assert.deepEqual(sent.at(-1), { type: "submit" });
 	} finally {
 		await handle.stop();
 	}
