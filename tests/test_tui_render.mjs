@@ -906,25 +906,36 @@ test("? key shows the help overlay", () => {
 });
 
 test("persistent checkmarks: select_one shows ✓ on chosen option after revisit", () => {
-	const { component, getDone } = drive([
-		{ header: "a", question: "A?", type: "select_one",
+	const { component } = drive([
+		{ id: "a", header: "a", question: "A?", type: "select_one",
 			options: [{ label: "Red" }, { label: "Blue" }] },
-		{ header: "b", question: "B?", type: "select_one",
+		{ id: "b", header: "b", question: "B?", type: "select_one",
 			options: [{ label: "Yes" }, { label: "No" }] },
 	]);
-	// Pick Red on question A
+	component.handleInput("\u001b[B"); // Blue
 	component.handleInput("\r");
-	// Now on Submit tab (single question advanced to B, but we have 2 questions
-	// so we move to B)
-	const lines = component.render(80).join("\n");
-	// Tab bar shows A as answered
-	assert.match(lines, /■ a/);
-	// Go back to A with [
 	component.handleInput("[");
+
 	const linesA = component.render(80).join("\n");
 	assert.match(linesA, /■ a/);
-	// The chosen option "Red" should be marked
-	assert.match(linesA, /✓|Red/);
+	assert.match(linesA, /✓ 2\. Blue/);
+	assert.doesNotMatch(linesA, /✓ 1\. Red/);
+});
+
+test("persistent checkmarks tolerate raw string choice answers from sync", () => {
+	const questions = normalizeQuestions([
+		{ id: "a", header: "a", question: "A?", type: "select_one",
+			options: [{ label: "Red" }, { label: "Blue" }] },
+		{ id: "b", header: "b", question: "B?", type: "free_text" },
+	]);
+	const factory = buildQuestionnaireComponent({ questions, terminalWriter: silentWriter });
+	const component = factory(makeFakeTui(), fakeTheme, {}, () => {});
+
+	component.applyBrowserAnswer("a", "Blue");
+	const lines = component.render(80).join("\n");
+
+	assert.match(lines, /✓ 2\. Blue/);
+	assert.doesNotMatch(lines, /✓ 1\. Red/);
 });
 
 test("Other revisit: re-entering Other prepopulates editor with previous text", () => {

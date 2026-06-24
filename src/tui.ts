@@ -181,6 +181,25 @@ function getOptionByIdx(q: CanonicalQuestion, idx: number): RenderOption | undef
 	return opts[idx];
 }
 
+function savedOptionValue(currentValue: AnswerValue | undefined): string | undefined {
+	if (currentValue === undefined) return undefined;
+	if (typeof currentValue === "string") return currentValue;
+	if (typeof currentValue === "object" && currentValue !== null && !Array.isArray(currentValue)) {
+		const value = currentValue as { mode?: string; value?: unknown; label?: unknown };
+		if (value.mode === "option" && typeof value.value === "string") return value.value;
+		if (typeof value.label === "string") return value.label;
+	}
+	return undefined;
+}
+
+function optionComparableValue(q: CanonicalQuestion, opt: RenderOption): string {
+	if (q.type === "confirm_enum") {
+		if (opt.label === "Affirm") return "affirm";
+		if (opt.label === "Decline") return "decline";
+	}
+	return opt.label;
+}
+
 const KEYMAP_HELP = [
 	"",
 	"  Keyboard shortcuts:",
@@ -1486,15 +1505,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const fakeChecked = showOtherMark ? true : isChecked;
 					const active = isOtherOpt && isOtherChosen;
 					const previewExpanded = expandedPreview[q.id] === i;
-					// Determine if this option matches the saved answer (blue checkmark)
-					let savedSelected = false;
-					if (!isOtherOpt && currentValue !== undefined
-						&& typeof currentValue === "object" && currentValue !== null
-						&& !Array.isArray(currentValue)
-						&& (currentValue as { mode?: string }).mode === "option"
-					) {
-						savedSelected = (currentValue as { value?: string }).value?.toLowerCase() === opt.label.toLowerCase();
-					}
+					// Determine if this option matches the saved answer (blue checkmark).
+					// Browser/client sync should send canonical objects, but older or
+					// stale paths may still hand us a raw option label. Be liberal here:
+					// rendering a revisit marker must not depend on the transport shape.
+					const savedValue = !isOtherOpt ? savedOptionValue(currentValue) : undefined;
+					const savedSelected = savedValue !== undefined
+						&& savedValue.toLowerCase() === optionComparableValue(q, opt).toLowerCase();
 					renderOptionLine(opt, i, selected, fakeChecked, active, previewExpanded, contentWidth, theme, lines, savedSelected);
 					// If Other is chosen, show the committed text on the
 					// next line as a hint.
