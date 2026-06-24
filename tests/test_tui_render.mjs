@@ -174,7 +174,7 @@ test("confirm_enum auto-fills Affirm/Decline + Other", () => {
 	assert.match(joined, /3\. Other/);
 });
 
-test("selected single-choice cursor uses a text glyph outside ANSI styling", () => {
+test("selected single-choice cursor uses pointing-hand emoji outside ANSI styling", () => {
 	const { lines: selectOneLines } = renderWithTheme([{
 		header: "Pick",
 		question: "Pick a color?",
@@ -184,8 +184,8 @@ test("selected single-choice cursor uses a text glyph outside ANSI styling", () 
 	const selectOneLine = selectOneLines.find((line) => stripAnsi(line).includes("1. Red"));
 	assert.ok(selectOneLine, "selected select_one option should render");
 	assert.doesNotMatch(stripAnsi(selectOneLine), />\s+1\. Red/, "single-choice cursor must not fall back to >");
-	assert.doesNotMatch(selectOneLine, /\x1b\[36m▶/, "cursor should not be inside the accent ANSI span");
-	assert.match(selectOneLine, /▶ \x1b\[36m {2}1\. Red/, "accent styling should start after the raw text cursor");
+	assert.doesNotMatch(selectOneLine, /\x1b\[36m👉/, "cursor should not be inside the accent ANSI span");
+	assert.match(selectOneLine, /👉 \x1b\[36m {2}1\. Red/, "accent styling should start after the raw emoji cursor");
 
 	const { lines: confirmLines } = renderWithTheme([{
 		header: "Go",
@@ -195,8 +195,8 @@ test("selected single-choice cursor uses a text glyph outside ANSI styling", () 
 	const confirmLine = confirmLines.find((line) => stripAnsi(line).includes("1. Affirm"));
 	assert.ok(confirmLine, "selected confirm_enum option should render");
 	assert.doesNotMatch(stripAnsi(confirmLine), />\s+1\. Affirm/, "confirm cursor must not fall back to >");
-	assert.doesNotMatch(confirmLine, /\x1b\[36m▶/, "cursor should not be inside the accent ANSI span");
-	assert.match(confirmLine, /▶ \x1b\[36m {2}1\. Affirm/, "accent styling should start after the raw text cursor");
+	assert.doesNotMatch(confirmLine, /\x1b\[36m👉/, "cursor should not be inside the accent ANSI span");
+	assert.match(confirmLine, /👉 \x1b\[36m {2}1\. Affirm/, "accent styling should start after the raw emoji cursor");
 });
 
 test("number question shows range", () => {

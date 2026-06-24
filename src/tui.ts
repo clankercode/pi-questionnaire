@@ -225,12 +225,11 @@ function frameInnerWidth(width: number): number {
 
 /** Cursor selectors drawn next to highlighted options.
  *
- * Single-choice rows use a text presentation glyph rather than emoji so
- * terminals that substitute unsupported emoji with `>` cannot turn the
- * cursor back into the old greater-than marker. Multi-select keeps the
- * pointing-hand glyph, which users reported renders correctly there. */
-export const SINGLE_CHOICE_CURSOR = "▶ ";
+ * Single-choice and multi-select rows share the same pointing-hand cursor so
+ * they render consistently. The cursor is prepended before ANSI styling is
+ * applied to the option text to avoid terminal/font fallback inside SGR spans. */
 export const SELECTOR_ARROW = "👉 ";
+export const SINGLE_CHOICE_CURSOR = SELECTOR_ARROW;
 
 // ---- Terminal title (OSC 0) --------------------------------------------
 
