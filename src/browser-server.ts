@@ -534,7 +534,7 @@ function renderBrowserPage(state: BrowserSyncServerInternal): string {
 <title>AskUserQuestion</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.45;color:#17202a;background:#fafafa}
-.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap;background:#fbfcff}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions{display:flex;gap:.75rem;margin:1rem 0}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
+.question{background:#fff;border:1px solid #ddd;border-radius:10px;padding:1rem;margin:1rem 0;box-shadow:0 1px 3px #0001}.active{border-color:#5b7cff}.submit-review{white-space:pre-wrap;background:#fbfcff}.muted{color:#667}.row{display:block;margin:.45rem 0}.preview{margin:.5rem 0;padding:.5rem;background:#f4f6fb;border-radius:6px;white-space:pre-wrap}.actions,.terminal-actions{display:flex;gap:.75rem;margin:1rem 0;align-items:center;flex-wrap:wrap}.timer{font-weight:600}.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#fffc;font-size:1.5rem}.overlay.visible{display:flex}textarea,input[type=text],input[type=number]{box-sizing:border-box;width:100%;padding:.45rem}button{padding:.45rem .8rem}fieldset{border:0;padding:0;margin:.5rem 0}
 </style>
 </head>
 <body>
@@ -555,6 +555,11 @@ let reconnectDelay = 500;
 let terminalLifecycle = state.lifecycle !== 'open';
 let awaitingState = !terminalLifecycle;
 let reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, state.currentTab));
+const AUTO_CLOSE_SECONDS = 5 * 60;
+let autoCloseRemainingSeconds = AUTO_CLOSE_SECONDS;
+let autoCloseInterval = null;
+let autoCloseTimerRunning = false;
+let autoCloseCancelled = false;
 function connect(){
   if(terminalLifecycle) return;
   clearTimeout(reconnectTimer);
@@ -583,6 +588,7 @@ function applyLifecycle(lifecycle){
     clearTimeout(reconnectTimer);
     setOverlayPending(false);
     document.getElementById('status').textContent = lifecycle === 'submitted' ? 'Submitted' : 'Cancelled';
+    if(lifecycle === 'cancelled') stopAutoCloseTimer();
   }
   return changed;
 }
@@ -739,6 +745,40 @@ function restoreFocus(focus){
   if(typeof focus.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(focus.start, focus.end);
 }
 function terminalText(){ return state.lifecycle === 'submitted' ? 'Questionnaire submitted.' : 'Questionnaire cancelled.'; }
+function formatCountdown(seconds){
+  const safe = Math.max(0, seconds);
+  return String(Math.floor(safe / 60)).padStart(2, '0')+':'+String(safe % 60).padStart(2, '0');
+}
+function autoCloseTimerText(){ return autoCloseCancelled ? 'Auto-close timer cancelled.' : 'This tab will close in '+formatCountdown(autoCloseRemainingSeconds)+'.'; }
+function updateAutoCloseTimerDisplay(){
+  const timer = document.getElementById('auto-close-timer');
+  if(timer) timer.textContent = autoCloseTimerText();
+  const cancel = document.getElementById('cancel-auto-close');
+  if(cancel) cancel.disabled = autoCloseCancelled;
+}
+function closeBrowserTab(){
+  const browserWindow = typeof window !== 'undefined' ? window : globalThis;
+  if(browserWindow && typeof browserWindow.close === 'function') browserWindow.close();
+}
+function stopAutoCloseTimer(){
+  if(autoCloseTimerRunning && autoCloseInterval !== null && typeof clearInterval === 'function') clearInterval(autoCloseInterval);
+  autoCloseInterval = null;
+  autoCloseTimerRunning = false;
+}
+function tickAutoCloseTimer(){
+  if(state.lifecycle !== 'submitted' || autoCloseCancelled){ stopAutoCloseTimer(); updateAutoCloseTimerDisplay(); return; }
+  autoCloseRemainingSeconds = Math.max(0, autoCloseRemainingSeconds - 1);
+  updateAutoCloseTimerDisplay();
+  if(autoCloseRemainingSeconds === 0){ stopAutoCloseTimer(); closeBrowserTab(); }
+}
+function startAutoCloseTimer(){
+  if(state.lifecycle !== 'submitted' || autoCloseCancelled || autoCloseTimerRunning){ updateAutoCloseTimerDisplay(); return; }
+  autoCloseRemainingSeconds = AUTO_CLOSE_SECONDS;
+  autoCloseTimerRunning = true;
+  autoCloseInterval = setInterval(tickAutoCloseTimer, 1000);
+  updateAutoCloseTimerDisplay();
+}
+function cancelAutoCloseTimer(){ autoCloseCancelled = true; stopAutoCloseTimer(); updateAutoCloseTimerDisplay(); }
 function displayAnswerValue(value){
   if(value === undefined) return 'unanswered';
   if(Array.isArray(value)) return value.map(displayAnswerValue).join(', ');
@@ -758,13 +798,54 @@ function submitReviewText(){
   });
   return lines.join('\\n');
 }
+function submittedAnswersText(){
+  const lines = ['Questionnaire submitted.', '', 'Submitted answers:', ''];
+  state.questions.forEach((q,i)=>{
+    lines.push((i + 1)+'. '+q.header);
+    lines.push('   Question: '+q.question);
+    lines.push('   Answer: '+displayAnswerValue(currentAnswer(i)));
+    const note = (state.options.notes || {})[q.id];
+    if(note) lines.push('   note: '+note);
+    lines.push('');
+  });
+  return lines.join('\\n').trimEnd();
+}
+function renderSubmittedTerminal(root){
+  const section = document.createElement('section');
+  section.className = 'question active submit-review terminal-submitted';
+  section.textContent = submittedAnswersText();
+  root.appendChild(section);
+  const controls = document.createElement('div');
+  controls.className = 'terminal-actions';
+  const timer = document.createElement('span');
+  timer.id = 'auto-close-timer';
+  timer.className = 'timer';
+  timer.textContent = autoCloseTimerText();
+  const closeNow = document.createElement('button');
+  closeNow.type = 'button';
+  closeNow.textContent = 'Close Now';
+  closeNow.onclick = closeBrowserTab;
+  const cancel = document.createElement('button');
+  cancel.id = 'cancel-auto-close';
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel timer';
+  cancel.disabled = autoCloseCancelled;
+  cancel.onclick = cancelAutoCloseTimer;
+  controls.append(timer, closeNow, cancel);
+  root.appendChild(controls);
+  startAutoCloseTimer();
+}
+function renderTerminal(root){
+  setActionsVisible(false);
+  if(state.lifecycle === 'submitted') renderSubmittedTerminal(root);
+  else { stopAutoCloseTimer(); root.textContent = terminalText(); }
+}
 function render(){
   const focus = captureFocus();
   const root = document.getElementById('questions'); root.innerHTML = ''; root.textContent = '';
   updateLifecycleOverlay();
   if(terminalLifecycle || state.lifecycle !== 'open'){
-    setActionsVisible(false);
-    root.textContent = terminalText();
+    renderTerminal(root);
     return;
   }
   setActionsVisible(true);

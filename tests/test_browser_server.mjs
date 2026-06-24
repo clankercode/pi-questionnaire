@@ -602,6 +602,113 @@ test("browser single-question submit remains immediate", async () => {
 	}
 });
 
+test("browser submitted page shows submitted answers and cancelable close timer", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const intervals = [];
+		let closeCount = 0;
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			window: { close: () => { closeCount++; } },
+			setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
+			setTimeout() {},
+			clearInterval() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+		sockets[0].onmessage({ data: JSON.stringify({
+			type: "state",
+			questions: QUESTIONS,
+			currentTab: 0,
+			answers: { "0": { mode: "option", value: "Blue" }, "1": "done" },
+			options: { notes: { note: "remember this" } },
+			lifecycle: "open",
+		}) });
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
+
+		const root = document.getElementById("questions");
+		assert.match(root.children[0].textContent, /Questionnaire submitted\./);
+		assert.match(root.children[0].textContent, /1\. Color/);
+		assert.match(root.children[0].textContent, /Answer: Blue/);
+		assert.match(root.children[0].textContent, /2\. Note/);
+		assert.match(root.children[0].textContent, /Answer: done/);
+		assert.match(root.children[0].textContent, /note: remember this/);
+		assert.equal(document.getElementById("actions").style.display, "none");
+		assert.match(document.getElementById("auto-close-timer").textContent, /05:00/);
+		assert.ok(intervals.some((interval) => interval.ms === 1000), "submitted view should start a one-second countdown");
+
+		const controls = root.children[1];
+		const closeNow = controls.children.find((child) => child.textContent === "Close Now");
+		const cancelTimer = controls.children.find((child) => child.textContent === "Cancel timer");
+		assert.ok(closeNow);
+		assert.ok(cancelTimer);
+		cancelTimer.onclick();
+		assert.match(document.getElementById("auto-close-timer").textContent, /cancelled/);
+		assert.equal(cancelTimer.disabled, true);
+		const countdown = intervals.find((interval) => interval.ms === 1000);
+		countdown.fn();
+		assert.equal(closeCount, 0, "cancelled timer should not close the tab");
+		closeNow.onclick();
+		assert.equal(closeCount, 1, "Close Now should close the tab immediately");
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser submitted page auto-closes after countdown reaches zero", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const intervals = [];
+		let closeCount = 0;
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			window: { close: () => { closeCount++; } },
+			setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
+			setTimeout() {},
+			clearInterval() {},
+			clearTimeout() {},
+		});
+		new vm.Script(scriptFromPage(page.text)).runInContext(context);
+
+		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
+
+		const countdown = intervals.find((interval) => interval.ms === 1000);
+		assert.ok(countdown, "submitted lifecycle should create a countdown interval");
+		for (let i = 0; i < 300; i++) countdown.fn();
+		assert.equal(closeCount, 1);
+		assert.match(document.getElementById("auto-close-timer").textContent, /00:00/);
+	} finally {
+		await handle.stop();
+	}
+});
+
 test("browser page hides pending overlay after terminal lifecycle", async () => {
 	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
 	try {
@@ -634,8 +741,8 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 		sockets[0].onmessage({ data: JSON.stringify({ type: "lifecycle", lifecycle: "submitted" }) });
 		assert.doesNotMatch(overlay.className, /visible/);
 		assert.equal(document.getElementById("status").textContent, "Submitted");
-		assert.equal(document.getElementById("questions").children.length, 0);
-		assert.match(document.getElementById("questions").textContent, /Questionnaire submitted/);
+		assert.equal(document.getElementById("questions").children.length, 2);
+		assert.match(document.getElementById("questions").children[0].textContent, /Questionnaire submitted/);
 		assert.equal(document.getElementById("actions").style.display, "none");
 	} finally {
 		await handle.stop();
