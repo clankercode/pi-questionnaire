@@ -245,6 +245,7 @@ function createFakeBrowserDom() {
 	}
 
 	const document = {
+		documentElement: null,
 		body: null,
 		activeElement: null,
 		createElement(tagName) {
@@ -265,7 +266,9 @@ function createFakeBrowserDom() {
 		addEventListener() {},
 	};
 	documentRef = document;
+	document.documentElement = new FakeElement("html");
 	document.body = new FakeElement("body");
+	document.documentElement.appendChild(document.body);
 	document.activeElement = document.body;
 	for (const id of ["status", "progress", "questions", "actions", "overlay", "mode-wrapper"]) {
 		const element = new FakeElement(id === "status" ? "p" : "div");
@@ -1596,6 +1599,41 @@ test("browser page has dark mode CSS variables and data-theme support", async ()
 		assert.match(bundle, /\[data-theme=dark\]/);
 		assert.match(bundle, /--clr-bg/);
 		assert.match(bundle, /--clr-accent/);
+	} finally {
+		await handle.stop();
+	}
+});
+
+test("browser dark theme is applied to the document root", async () => {
+	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send() {}
+		}
+		const localStorage = createFakeLocalStorage();
+		localStorage.setItem("pq-theme", "dark");
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage,
+			window: { matchMedia: () => ({ matches: false, onchange: null }) },
+			setInterval() {},
+			setTimeout() {},
+			clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		assert.equal(document.documentElement.dataset.theme, "dark");
+		assert.notEqual(document.body.dataset.theme, "dark");
 	} finally {
 		await handle.stop();
 	}

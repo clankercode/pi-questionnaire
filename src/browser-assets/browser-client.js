@@ -460,7 +460,9 @@ function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.curr
 const THEME_KEY='pq-theme';
 const themes=[{id:'auto',label:'System',icon:'\u25CC'},{id:'light',label:'Light',icon:'\u2600'},{id:'dark',label:'Dark',icon:'\u263E'}];
 let themeIdx=0;
-function applyTheme(theme){ document.body.dataset.theme=theme; if(typeof localStorage!=='undefined') localStorage.setItem(THEME_KEY,theme); if(theme==='auto'){ mediaQuery.onchange=e=>{ if((localStorage.getItem(THEME_KEY)||'auto')==='auto') document.body.dataset.theme=e.matches?'dark':'auto'; }; if(mediaQuery.matches) document.body.dataset.theme='dark'; } else { mediaQuery.onchange=null; } }
+function themeRoot(){ return document.documentElement || document.body; }
+function effectiveTheme(theme){ return theme === 'auto' ? (mediaQuery.matches ? 'dark' : 'light') : theme; }
+function applyTheme(theme){ themeRoot().dataset.theme=effectiveTheme(theme); if(typeof localStorage!=='undefined') localStorage.setItem(THEME_KEY,theme); if(theme==='auto'){ mediaQuery.onchange=()=>{ if((localStorage.getItem(THEME_KEY)||'auto')==='auto') themeRoot().dataset.theme=effectiveTheme('auto'); }; } else { mediaQuery.onchange=null; } }
 function toggleTheme(){ themeIdx=(themeIdx+1)%themes.length; applyTheme(themes[themeIdx].id); renderThemeBtn(); }
 function renderThemeBtn(){ const btn=document.getElementById('theme-toggle'); if(!btn)return; const t=themes[themeIdx]; btn.textContent=t.icon+' '+t.label; btn.title='Theme: '+t.label+' (click to cycle)'; }
 function renderLayoutBtn(){ const btn=document.getElementById('layout-toggle'); if(!btn)return; btn.textContent=isSingleMode()?'One Q':'All Qs'; btn.title='Layout: '+(isSingleMode()?'One question at a time':'All questions'); }
