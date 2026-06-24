@@ -429,6 +429,22 @@ test("confirm_enum: arrow-down + Enter on Decline returns decline", () => {
 	}
 });
 
+test("select_one Other: Ctrl+Left renders cursor on the active editor line", () => {
+	const { component } = drive([{
+		header: "x",
+		question: "Pick?",
+		type: "select_one",
+		options: [{ label: "A" }, { label: "B" }],
+	}]);
+	component.handleInput("\u001b[B"); // down to B
+	component.handleInput("\u001b[B"); // down to Other (auto-opens editor)
+	component.setEditorText("first line\nsecond word");
+	component.handleInput("\u001b[1;5D"); // Ctrl+Left to start of "word"
+
+	const joined = component.render(100).join("\n");
+	assert.match(joined, /second ▏word/);
+});
+
 test("select_one Other: bracket characters are typed into the editor", () => {
 	const { component } = drive([{
 		header: "x",

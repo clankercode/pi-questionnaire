@@ -1364,6 +1364,25 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			}
 		}
 
+		function appendInlineEditorLines(lines: string[], label: string, placeholder: string) {
+			const cursor = theme.fg("accent", "▏");
+			if (editor.getText().length === 0) {
+				lines.push(`     ${theme.fg("muted", label)} ${theme.fg("dim", placeholder)}${cursor}`);
+				return;
+			}
+			const editorLines = editor.getLines();
+			const { line: cursorLine, col } = editor.getCursor();
+			const labelPrefix = `     ${theme.fg("muted", label)} `;
+			const continuationPrefix = `     ${" ".repeat(visibleWidth(label) + 1)}`;
+			for (let i = 0; i < editorLines.length; i++) {
+				const text = editorLines[i] ?? "";
+				const lineBody = i === cursorLine
+					? `${theme.fg("accent", text.slice(0, col))}${cursor}${theme.fg("accent", text.slice(col))}`
+					: theme.fg("accent", text);
+				lines.push(`${i === 0 ? labelPrefix : continuationPrefix}${lineBody}`);
+			}
+		}
+
 		function render(width: number): string[] {
 			// Audible bell on the first render — by this point the TUI
 			// is visible to the user, so the bell won't ring while
@@ -1538,20 +1557,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// field. The editor's text buffer stays in sync; the cursor
 				// is drawn at the editor's reported cursor column.
 				if (inputMode === "other" && inputQuestionId === q.id) {
-					const draft = editor.getText();
-					const { col } = editor.getCursor();
-					const cursor = theme.fg("accent", "▏");
-					if (draft.length === 0) {
-						lines.push(
-							`     ${theme.fg("muted", "Other:")} ${theme.fg("dim", "(type a custom answer)")}${cursor}`,
-						);
-					} else {
-						const before = draft.slice(0, col);
-						const after = draft.slice(col);
-						lines.push(
-							`     ${theme.fg("muted", "Other:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`,
-						);
-					}
+					appendInlineEditorLines(lines, "Other:", "(type a custom answer)");
 				}
 				// [Select] button for multi_select (commits the array)
 				if (q.type === "select_many") {
@@ -1579,17 +1585,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					);
 				}
 				if (isEditing) {
-					const draft = editor.getText();
-					const { col } = editor.getCursor();
-					const cursor = theme.fg("accent", "▏");
 					lines.push("");
-					if (draft.length === 0) {
-						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("dim", "(type a number)")}${cursor}`);
-					} else {
-						const before = draft.slice(0, col);
-						const after = draft.slice(col);
-						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`);
-					}
+					appendInlineEditorLines(lines, "Answer:", "(type a number)");
 				} else {
 					const current = answers.get(q.id)?.value;
 					if (current !== undefined) {
@@ -1602,23 +1599,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			} else if (q.type === "free_text") {
 				const isEditing = inputMode === "free_text" && inputQuestionId === q.id;
 				if (isEditing) {
-					// Compact one-liner editor display — same pattern as
-					// the Other editor. The pi-tui Editor captures all
-					// input mechanics (word delete, history, multi-line)
-					// in the background; we just display its current text
-					// inline. Empty state shows the placeholder (preloaded
-					// by reconcileMode) as a dim hint.
-					const draft = editor.getText();
-					const { col } = editor.getCursor();
-					const cursor = theme.fg("accent", "▏");
+					// Compact inline editor display. The pi-tui Editor captures
+					// input mechanics (word delete, history, multi-line) in the
+					// background; we render its active cursor line inline.
 					lines.push("");
-					if (draft.length === 0) {
-						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("dim", "(type your answer)")}${cursor}`);
-					} else {
-						const before = draft.slice(0, col);
-						const after = draft.slice(col);
-						lines.push(`     ${theme.fg("muted", "Answer:")} ${theme.fg("accent", before)}${cursor}${theme.fg("accent", after)}`);
-					}
+					appendInlineEditorLines(lines, "Answer:", "(type your answer)");
 				} else {
 					lines.push(theme.fg("muted", "(type your answer — Enter saves)"));
 					if (q.placeholder) {
