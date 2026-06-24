@@ -28,6 +28,9 @@ tests/__pycache__/
 .vscode/
 .idea/
 *.swp
+
+# Worktrees
+.worktrees/
 *.swo
 
 # Worktree scratch
