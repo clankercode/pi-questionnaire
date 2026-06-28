@@ -78,7 +78,7 @@ function render(questions, width = 80) {
 
 function renderWithTheme(questions, theme, width = 80) {
 	const canonical = normalizeQuestions(questions);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions: canonical,
 		terminalWriter: silentWriter,
 	});
@@ -90,7 +90,7 @@ function renderWithTheme(questions, theme, width = 80) {
 
 function drive(questions) {
 	const canonical = normalizeQuestions(questions);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions: canonical,
 		terminalWriter: silentWriter,
 	});
@@ -540,7 +540,7 @@ test("TUI mount sets title with bell prefix; submit clears it", () => {
 			header: "Pick", question: "Pick one?", type: "select_one",
 			options: [{ label: "A" }, { label: "B" }],
 		}]);
-		const factory = buildQuestionnaireComponent({ questions: canonical });
+		const factory = buildQuestionnaireComponent({ submitDebounceMs: 0, questions: canonical });
 		factory(makeFakeTui(), fakeTheme, {}, () => {});
 		const setCalls = writes.filter((w) => w.startsWith("\x1b]0;"));
 		assert.ok(setCalls.length >= 1, "expected at least one title-set on mount");
@@ -554,7 +554,7 @@ test("duration timer appears in status line; updates on re-render", async () => 
 	const canonical = normalizeQuestions([{
 		header: "h", question: "q?", type: "free_text",
 	}]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions: canonical,
 		terminalWriter: silentWriter,
 	});
@@ -576,7 +576,7 @@ test("dispose() prevents further timer callbacks; safe to call multiple times", 
 	const canonical = normalizeQuestions([{
 		header: "h", question: "q?", type: "free_text",
 	}]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions: canonical,
 		terminalWriter: silentWriter,
 	});
@@ -979,7 +979,7 @@ test("persistent checkmarks render the saved marker with its own accent ANSI spa
 		{ id: "b", header: "b", question: "B?", type: "select_one",
 			options: [{ label: "Yes" }, { label: "No" }] },
 	]);
-	const factory = buildQuestionnaireComponent({ questions, terminalWriter: silentWriter });
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0, questions, terminalWriter: silentWriter });
 	const component = factory(makeFakeTui(), ansiTheme, {}, () => {});
 
 	component.handleInput("\u001b[B"); // Blue
@@ -1000,7 +1000,7 @@ test("persistent checkmarks tolerate raw string choice answers from sync", () =>
 			options: [{ label: "Red" }, { label: "Blue" }] },
 		{ id: "b", header: "b", question: "B?", type: "free_text" },
 	]);
-	const factory = buildQuestionnaireComponent({ questions, terminalWriter: silentWriter });
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0, questions, terminalWriter: silentWriter });
 	const component = factory(makeFakeTui(), fakeTheme, {}, () => {});
 
 	component.applyBrowserAnswer("a", "Blue");
@@ -1083,7 +1083,7 @@ test("browser-origin tab and answer updates debounce TUI refresh", async () => {
 	]);
 	let renderCount = 0;
 	let doneValue = null;
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1115,7 +1115,7 @@ test("browser-origin notes are included in submitted TUI result", () => {
 		{ id: "b", header: "b", question: "B?", type: "free_text" },
 	]);
 	let doneValue = null;
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1141,7 +1141,7 @@ test("browser-origin free_text updates active editor and TUI submit preserves sp
 		{ id: "b", header: "b", question: "B?", type: "free_text" },
 	]);
 	let doneValue = null;
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1167,7 +1167,7 @@ test("browser-origin notes update active notes editor and TUI submit preserves n
 		{ id: "a", header: "a", question: "A?", type: "select_one", options: [{ label: "Red" }] },
 	]);
 	let doneValue = null;
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1193,7 +1193,7 @@ test("browser-origin number answer replaces stale local draft after notes", () =
 	const questions = normalizeQuestions([
 		{ id: "qty", header: "Qty", question: "How many?", type: "number", min: 0, max: 10 },
 	]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1213,7 +1213,7 @@ test("browser-origin clear answer drops stale local draft after notes", () => {
 	const questions = normalizeQuestions([
 		{ id: "text", header: "Text", question: "Describe?", type: "free_text" },
 	]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1234,7 +1234,7 @@ test("local save drops stale draft from before notes", () => {
 		{ id: "text", header: "Text", question: "Describe?", type: "free_text" },
 		{ id: "next", header: "Next", question: "Next?", type: "free_text" },
 	]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1259,7 +1259,7 @@ test("browser-origin submit is blocked until every question is answered", async 
 	]);
 	let doneValue = null;
 	let renderCount = 0;
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions,
 		terminalWriter: silentWriter,
 		browserIdleMs: 5,
@@ -1677,7 +1677,7 @@ test("TUI mount writes a BEL when bellOnQuestion is true (default)", () => {
 		type: "select_one",
 		options: [{ label: "A" }, { label: "B" }],
 	}]);
-	const factory = buildQuestionnaireComponent({
+	const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 		questions: canonical,
 		terminalWriter: writer,
 	});
@@ -1702,7 +1702,7 @@ test("TUI mount writes NO BEL when bellOnQuestion is false (in-memory override)"
 			type: "select_one",
 			options: [{ label: "A" }, { label: "B" }],
 		}]);
-		const factory = buildQuestionnaireComponent({
+		const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 			questions: canonical,
 			terminalWriter: writer,
 		});
@@ -1734,7 +1734,7 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			type: "select_one",
 			options: [{ label: "A" }, { label: "B" }],
 		}]);
-		const factory = buildQuestionnaireComponent({
+		const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 			questions: canonical,
 			terminalWriter: writer,
 		});
@@ -1764,7 +1764,7 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			type: "select_one",
 			options: [{ label: "A" }, { label: "B" }],
 		}]);
-		const factory = buildQuestionnaireComponent({
+		const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 			questions: canonical,
 			terminalWriter: writer,
 		});
@@ -1792,7 +1792,7 @@ test("TUI submit/cancel/dispose do NOT re-trigger the bell", () => {
 			type: "select_one",
 			options: [{ label: "A" }, { label: "B" }],
 		}]);
-		const factory = buildQuestionnaireComponent({
+		const factory = buildQuestionnaireComponent({ submitDebounceMs: 0,
 			questions: canonical,
 			terminalWriter: writer,
 		});

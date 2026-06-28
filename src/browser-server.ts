@@ -37,6 +37,8 @@ export interface BrowserSyncServerOptions {
 	onSubmit?: () => boolean | void;
 	onCancel?: () => void;
 	log?: (line: string) => void;
+	/** Submit debounce in ms. Default 250; tests pass 0. */
+	submitDebounceMs?: number;
 }
 
 export interface BrowserSyncStatePatch {
@@ -83,7 +85,8 @@ interface BrowserSyncServerInternal {
 	nonce: string;
 	port: number;
 	url: string;
-	callbacks: Required<Pick<BrowserSyncServerOptions, "log">> & Omit<BrowserSyncServerOptions, "questions" | "initialAnswers" | "initialNotes" | "preferredPort" | "host" | "log">;
+	submitDebounceMs: number;
+	callbacks: Required<Pick<BrowserSyncServerOptions, "log">> & Omit<BrowserSyncServerOptions, "questions" | "initialAnswers" | "initialNotes" | "preferredPort" | "host" | "log" | "submitDebounceMs">;
 	stopped: boolean;
 }
 
@@ -143,6 +146,7 @@ export async function startBrowserSyncServer(
 		nonce,
 		port,
 		url,
+		submitDebounceMs: opts.submitDebounceMs ?? 250,
 		callbacks,
 		stopped: false,
 	};
@@ -561,6 +565,7 @@ async function renderBrowserPage(state: BrowserSyncServerInternal): Promise<stri
 		answers: state.answers,
 		options: state.options,
 		lifecycle: state.lifecycle,
+		submitDebounceMs: state.submitDebounceMs ?? 250,
 		renderOptions: Object.fromEntries(
 			state.questions.map((question, index) => [String(index), getRenderOptions(question)]),
 		),

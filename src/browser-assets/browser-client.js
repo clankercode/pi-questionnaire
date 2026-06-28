@@ -9,6 +9,8 @@ let reconnectDelay = 500;
 let terminalLifecycle = state.lifecycle !== 'open';
 let awaitingState = !terminalLifecycle;
 let reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, state.currentTab));
+const SUBMIT_DEBOUNCE_MS = (BOOT && typeof BOOT.submitDebounceMs === 'number') ? BOOT.submitDebounceMs : 250;
+let submitReadyAt = Date.now(); // single-question: already past debounce at mount
 const AUTO_CLOSE_SECONDS = 5 * 60;
 let autoCloseRemainingSeconds = AUTO_CLOSE_SECONDS;
 let autoCloseInterval = null;
@@ -89,9 +91,10 @@ function updateActionLabels(){
   const reviewing = isReviewTab();
   const missing = missingAnswerCount();
   const submit = document.getElementById('submit');
-  submit.textContent = reviewing ? 'Confirm Submit' : 'Submit';
-  submit.disabled = missing > 0;
-  submit.setAttribute('aria-disabled', missing > 0 ? 'true' : 'false');
+  const debounceActive = reviewing && Date.now() < submitReadyAt;
+  submit.textContent = debounceActive ? 'Please wait...' : reviewing ? 'Confirm Submit' : 'Submit';
+  submit.disabled = missing > 0 || debounceActive;
+  submit.setAttribute('aria-disabled', (missing > 0 || debounceActive) ? 'true' : 'false');
   const warning = document.getElementById('submit-warning');
   if(warning) warning.textContent = missing > 0 ? 'Answer all questions before submitting — '+missing+' remaining.' : '';
   const reviewBack = document.getElementById('review-back');
@@ -209,9 +212,9 @@ function answerValue(q,i,el){
 function setTab(i){ state.currentTab = i; if(i < state.questions.length) reviewReturnTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
 function isReviewTab(){ return state.currentTab === state.questions.length; }
 function reviewBackTab(){ return Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); }
-function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); setTab(state.questions.length); render(); }
+function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); submitReadyAt = Date.now() + SUBMIT_DEBOUNCE_MS; setTab(state.questions.length); render(); }
 function returnFromSubmitReview(){ setTab(reviewBackTab()); render(); }
-function confirmSubmit(){ if(!allAnswered()){ updateActionLabels(); return; } flushDebounced(); send({type:'submit'}); }
+function confirmSubmit(){ if(!allAnswered()){ updateActionLabels(); return; } if(Date.now() < submitReadyAt) return; flushDebounced(); send({type:'submit'}); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function isTextValueControl(el){
   if(!el) return false;
@@ -497,6 +500,6 @@ document.getElementById('back-btn').onclick = () => { goBack(); };
 document.getElementById('next-btn').onclick = () => { goNext(); };
 document.getElementById('theme-toggle').onclick = () => { toggleTheme(); };
 document.getElementById('layout-toggle').onclick = () => { toggleLayout(); };
-document.addEventListener('keydown', event => { if(event.key==='Enter' && isSingleMode() && !isReviewTab() && isTextCtrl(document.activeElement)){ event.preventDefault(); goNext(); } });
+document.addEventListener('keydown', event => { if(event.key==='Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && isSingleMode() && !isReviewTab() && isTextCtrl(document.activeElement)){ event.preventDefault(); goNext(); } });
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);

@@ -51,6 +51,9 @@ export interface TuiOptions {
 	/** Browser-origin updates suppress immediate TUI redraws and refresh
 	 * after this idle window. Production default is 3s; tests override. */
 	browserIdleMs?: number;
+	/** Delay in ms before submit is accepted after entering the submit screen.
+	 * Guards against sticky Enter keys double-firing. Default 250; tests set 0. */
+	submitDebounceMs?: number;
 	/** Called when TUI-origin state changes should be broadcast to browser clients. */
 	onBrowserStateChange?: (patch: BrowserTuiStatePatch) => void;
 }
@@ -331,6 +334,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		let browserOpenHandler: ((url: string) => void) | null = null;
 		let browserRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 		const browserIdleMs = opts.browserIdleMs ?? 3000;
+		// Debounce: prevent accidental submit within 250ms of entering
+		// the submit/review screen (guards against sticky Enter keys).
+		let submitScreenEnteredAt = 0;
+		const SUBMIT_DEBOUNCE_MS = opts.submitDebounceMs ?? 250;
 
 		const editorTheme: EditorTheme = {
 			borderColor: (s: string) => theme.fg("accent", s),
@@ -351,6 +358,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 		// updating the title concurrently.
 		// unref() so the interval doesn't keep Node alive (esp. in tests).
 		const askedAt = Date.now();
+		// Initialize at mount so the single-question submit path
+		// (which bypasses the submit screen) is always past the debounce.
+		submitScreenEnteredAt = askedAt;
 		let durationTimer: ReturnType<typeof setInterval> | null = null;
 		if (typeof setInterval === "function") {
 			durationTimer = setInterval(() => {
@@ -532,6 +542,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				currentTab += 1;
 			} else {
 				currentTab = questions.length; // Submit tab
+				submitScreenEnteredAt = Date.now();
 			}
 			optionIndex = 0;
 			opts.onBrowserStateChange?.({ currentTab });
@@ -539,7 +550,13 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			reconcileMode(); // open the editor on the next tab if it's a danger question
 		}
 
+		function canSubmitNow(): boolean {
+			return Date.now() - submitScreenEnteredAt >= SUBMIT_DEBOUNCE_MS;
+		}
+
 		function submit() {
+			if (submitScreenEnteredAt === 0) submitScreenEnteredAt = Date.now();
+			if (!canSubmitNow()) return;
 			if (durationTimer !== null) clearInterval(durationTimer);
 			clearBrowserRefresh();
 			clearTerminalTitle(terminalWriter);
@@ -934,11 +951,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// printable character the user might type into the
 					// editor. Tab is the canonical notes toggle, not 'n'.
 					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs,
-					// so they close the Other editor. Literal [ and ] are
-					// printable text while the editor is active.
+					// Left/Right stay in the Other editor (cursor movement),
+					// not tab navigation. Tab is the canonical notes toggle.
 					const isNavKey = matchesKey(data, Key.up) || matchesKey(data, Key.down)
 						|| data === "0"
-						|| data === "\x1b[D" || data === "\x1b[C"
 						|| matchesKey(data, Key.tab);
 					if (!isNavKey) {
 						editor.handleInput(data);
@@ -998,9 +1014,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					return;
 				}
 				// In notes mode, Enter saves and returns to the answer view.
-				if (inputMode === "notes" && matchesKey(data, Key.enter)) {
-					closeNotes();
-					return;
+				// Ctrl+J (\n) inserts a newline instead.
+				if (inputMode === "notes") {
+					if (data === "\n") {
+						editor.handleInput(data);
+						refresh();
+						return;
+					}
+					if (matchesKey(data, Key.enter)) {
+						closeNotes();
+						return;
+					}
 				}
 				if (inputMode === "free_text" && matchesKey(data, Key.enter)) {
 					const q = inputQuestionId ? questions.find((question) => question.id === inputQuestionId) : undefined;
@@ -1066,6 +1090,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				// ] or Right arrow: next question tab
 				if (data === "]" || data === "\x1b[C") {
 					currentTab = Math.min(questions.length, currentTab + 1);
+					if (currentTab === questions.length) submitScreenEnteredAt = Date.now();
 					optionIndex = 0;
 					opts.onBrowserStateChange?.({ currentTab });
 					refresh();
@@ -1074,6 +1099,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				}
 				if (data === "0") {
 					currentTab = questions.length;
+					submitScreenEnteredAt = Date.now();
 					opts.onBrowserStateChange?.({ currentTab });
 					refresh();
 					reconcileMode();
@@ -1305,6 +1331,7 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				return true;
 			}
 			currentTab = questions.length;
+			submitScreenEnteredAt = Date.now();
 			opts.onBrowserStateChange?.({ currentTab });
 			scheduleBrowserRefresh();
 			return false;
@@ -1470,7 +1497,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 						}
 					}
 				lines.push("");
-				lines.push(theme.fg("muted", missing > 0 ? "[Enter] answer all questions first  [Esc] cancel" : "[Enter] submit  [Esc] cancel"));
+				const submitReady = canSubmitNow();
+				lines.push(theme.fg("muted", missing > 0 ? "[Enter] answer all questions first  [Esc] cancel" : submitReady ? "[Enter] submit  [Esc] cancel" : "[Enter] submit (wait a moment...)  [Esc] cancel"));
 				return wrapInFrame(lines, width);
 			}
 

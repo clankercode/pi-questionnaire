@@ -352,7 +352,7 @@ test("browser page treats internal Other sentinel text as unanswered", async () 
 	const otherQuestions = normalizeQuestions([
 		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
 	]);
-	const handle = await startBrowserSyncServer({
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0,
 		questions: otherQuestions,
 		initialAnswers: { "0": { mode: "other", text: "__other__" } },
 		preferredPort: 0,
@@ -398,7 +398,7 @@ test("browser page treats internal Other sentinel text as unanswered", async () 
 });
 
 test("browser server serves healthz and questionnaire page", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		assert.equal(handle.url, `http://127.0.0.1:${handle.port}/q/${handle.batchId}?nonce=${handle.nonce}`);
 		const health = await fetchText(`http://127.0.0.1:${handle.port}/healthz`);
@@ -424,7 +424,7 @@ test("browser server serves healthz and questionnaire page", async () => {
 });
 
 test("browser assets are served dynamically with no-store caching", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	const styleAsset = new URL("../src/browser-assets/browser-style.css", import.meta.url);
 	const originalStyle = await readFile(styleAsset, "utf8");
 	try {
@@ -458,7 +458,7 @@ test("browser assets are served dynamically with no-store caching", async () => 
 });
 
 test("browser websocket sends initial state and replies to ping", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	let client;
 	try {
 		client = await connectWs(handle);
@@ -479,7 +479,7 @@ test("browser websocket sends initial state and replies to ping", async () => {
 
 test("browser websocket accepts answer, tab, submit, and cancel messages", async () => {
 	const events = [];
-	const handle = await startBrowserSyncServer({
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0,
 		questions: QUESTIONS,
 		preferredPort: 0,
 		onAnswer: (questionId, value) => events.push({ type: "answer", questionId, value }),
@@ -517,7 +517,7 @@ test("browser websocket accepts answer, tab, submit, and cancel messages", async
 });
 
 test("browser page script restores answers and auto-tabs on control focus", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -545,7 +545,7 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 });
 
 test("browser page protects focused answer and notes from stale websocket echoes", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -598,7 +598,7 @@ test("browser page protects focused answer and notes from stale websocket echoes
 });
 
 test("browser page flushes pending answer and notes before confirm submit", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -660,7 +660,7 @@ test("browser page flushes pending answer and notes before confirm submit", asyn
 });
 
 test("browser confirm screen Back returns to the previous question view", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -704,7 +704,7 @@ test("browser confirm screen Back returns to the previous question view", async 
 
 test("browser single-question submit remains immediate", async () => {
 	const [question] = QUESTIONS;
-	const handle = await startBrowserSyncServer({
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0,
 		questions: [question],
 		initialAnswers: { "0": { mode: "option", value: "Red" } },
 		preferredPort: 0,
@@ -741,7 +741,7 @@ test("browser single-question submit remains immediate", async () => {
 });
 
 test("browser submitted page shows submitted answers and cancelable close timer", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -810,7 +810,7 @@ test("browser submitted page shows submitted answers and cancelable close timer"
 });
 
 test("browser submitted page auto-closes after countdown reaches zero", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -851,7 +851,7 @@ test("browser submitted page auto-closes after countdown reaches zero", async ()
 });
 
 test("browser page hides pending overlay after terminal lifecycle", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -892,7 +892,7 @@ test("browser page hides pending overlay after terminal lifecycle", async () => 
 });
 
 test("browser page avoids unconditional websocket re-renders and restores focused controls", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -915,7 +915,7 @@ test("browser focused Other text input is not recreated by stale answer echoes",
 		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
 		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
 	]);
-	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: otherQuestions, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -961,7 +961,7 @@ test("browser Other text input sends typed text and survives stale answer echoes
 		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
 		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
 	]);
-	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: otherQuestions, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1020,7 +1020,7 @@ test("browser Other text input survives unrelated option re-renders before debou
 		{ id: "decision", header: "Decision", question: "Proceed?", type: "confirm_enum" },
 		{ id: "fallback", header: "Fallback", question: "Fallback?", type: "confirm_enum" },
 	]);
-	const handle = await startBrowserSyncServer({ questions: otherQuestions, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: otherQuestions, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1074,7 +1074,7 @@ test("focused Other text input value survives direct DOM re-renders", async () =
 			options: [{ label: "Red", preview: { type: "text", content: "preview" } }],
 		},
 	]);
-	const handle = await startBrowserSyncServer({ questions: previewQuestions, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: previewQuestions, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1117,7 +1117,7 @@ test("focused Other text input value survives direct DOM re-renders", async () =
 });
 
 test("browser page inline script is syntactically valid", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		assert.equal(page.response.status, 200);
@@ -1130,7 +1130,7 @@ test("browser page inline script is syntactically valid", async () => {
 });
 
 test("reconnected websocket receives latest full state snapshot", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	let first;
 	let second;
 	try {
@@ -1150,7 +1150,7 @@ test("reconnected websocket receives latest full state snapshot", async () => {
 });
 
 test("browser page renders the Submit review tab from TUI tab sync", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1195,7 +1195,7 @@ test("browser submit rejection keeps lifecycle open and syncs review tab", async
 	const events = [];
 	let acceptsSubmit = false;
 	let handle;
-	handle = await startBrowserSyncServer({
+	handle = await startBrowserSyncServer({ submitDebounceMs: 0,
 		questions: QUESTIONS,
 		preferredPort: 0,
 		onSubmit: () => {
@@ -1230,7 +1230,7 @@ test("browser submit rejection keeps lifecycle open and syncs review tab", async
 });
 
 test("late websocket join receives terminal lifecycle in state snapshot", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	let client;
 	try {
 		handle.updateFromTui({ lifecycle: "submitted" });
@@ -1244,7 +1244,7 @@ test("late websocket join receives terminal lifecycle in state snapshot", async 
 });
 
 test("stopping an open browser server broadcasts cancelled lifecycle", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	let client;
 	try {
 		client = await connectWs(handle);
@@ -1263,7 +1263,7 @@ test("empty number answers clear stale state instead of coercing to zero", async
 		{ id: "count", header: "Count", question: "How many?", type: "number", min: 0 },
 	]);
 	const events = [];
-	const handle = await startBrowserSyncServer({
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0,
 		questions: numberQuestions,
 		preferredPort: 0,
 		onAnswer: (questionId, value) => events.push({ type: "answer", questionId, value }),
@@ -1288,7 +1288,7 @@ test("empty number answers clear stale state instead of coercing to zero", async
 });
 
 test("browser page has semantic progress band with step markers", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1304,7 +1304,7 @@ test("browser page has semantic progress band with step markers", async () => {
 });
 
 test("browser page uses choice-row structure with selected state", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1319,7 +1319,7 @@ test("browser page uses choice-row structure with selected state", async () => {
 });
 
 test("browser page has notes-field wrapper with dashed border styling", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1332,7 +1332,7 @@ test("browser page has notes-field wrapper with dashed border styling", async ()
 });
 
 test("browser review screen uses ledger structure with QUESTION/ANSWER/NOTES labels", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1349,7 +1349,7 @@ test("browser review screen uses ledger structure with QUESTION/ANSWER/NOTES lab
 });
 
 test("browser submitted screen uses receipt structure", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1362,7 +1362,7 @@ test("browser submitted screen uses receipt structure", async () => {
 });
 
 test("browser review ledger renders structured QUESTION/ANSWER/NOTES per question", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1413,7 +1413,7 @@ test("browser review ledger renders structured QUESTION/ANSWER/NOTES per questio
 });
 
 test("browser submitted receipt has structured layout with answer values", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1462,7 +1462,7 @@ test("choice row click toggles checkbox and selects radio", async () => {
 		{ id: "color", header: "Color", question: "Pick a color?", type: "select_one", options: [{ label: "Red" }, { label: "Blue" }] },
 		{ id: "features", header: "Features", question: "Pick features?", type: "select_many", options: [{ label: "A" }, { label: "B" }] },
 	]);
-	const handle = await startBrowserSyncServer({ questions: multiQs, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: multiQs, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1506,7 +1506,7 @@ test("choice row click toggles checkbox and selects radio", async () => {
 });
 
 test("radio row click selects and clears siblings", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1550,7 +1550,7 @@ test("radio row click selects and clears siblings", async () => {
 });
 
 test("progress step click exits review mode", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1586,7 +1586,7 @@ test("progress step click exits review mode", async () => {
 });
 
 test("browser page has theme and layout toggle controls", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1603,7 +1603,7 @@ test("browser page has theme and layout toggle controls", async () => {
 });
 
 test("browser page has dark mode CSS variables and data-theme support", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1618,7 +1618,7 @@ test("browser page has dark mode CSS variables and data-theme support", async ()
 });
 
 test("browser dark theme is applied to the document root", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1653,7 +1653,7 @@ test("browser dark theme is applied to the document root", async () => {
 });
 
 test("browser page has single-question mode layout support", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1674,7 +1674,7 @@ test("browser page has single-question mode layout support", async () => {
 });
 
 test("browser dark mode requests dark native control rendering", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const bundle = await browserAssetBundle(page.text, handle.url);
@@ -1686,7 +1686,7 @@ test("browser dark mode requests dark native control rendering", async () => {
 });
 
 test("browser review screen hides single-question Back and Next controls", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		const document = createFakeBrowserDom();
@@ -1724,7 +1724,7 @@ test("browser review screen hides single-question Back and Next controls", async
 });
 
 test("browser submit is disabled with clear feedback until all questions are answered", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		assert.match(page.text, /submit-warning/);
@@ -1765,7 +1765,7 @@ test("browser submit is disabled with clear feedback until all questions are ans
 });
 
 test("cancel button removed and helper text present", async () => {
-	const handle = await startBrowserSyncServer({ questions: QUESTIONS, preferredPort: 0 });
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
 	try {
 		const page = await fetchText(handle.url);
 		assert.doesNotMatch(page.text, /<button id="cancel">/);
