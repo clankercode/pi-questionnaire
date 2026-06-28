@@ -4,6 +4,60 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
+## [2.1.0] - 2026-06-28
+
+### Highlights
+
+- **`ask_user` tool override** — the extension now replaces the built-in `ask_user` tool with the rich questionnaire TUI. The LLM can call either `AskUserQuestion` (full schema with 5 question types, previews, notes) or `ask_user` (simpler `confirm`/`select`/`multiselect`/`input`/`batch` schema) and both route to the same TUI with browser sync, previews, notes, and all 13 settings.
+- **Browser UI overhaul** — the browser questionnaire page has been rebuilt with an editorial document layout, dark mode, a layout toggle (single-question / all-questions), row-click option selection, and a review/submit flow redesign.
+- **Browser confirm + submitted screens** — dedicated confirm-before-submit and submitted-receipt screens with auto-close timer.
+
+### Added
+
+- Added `src/ask-user-adapter.ts` with TypeBox schema and param conversion for the built-in `ask_user` tool surface (`7477051`). The adapter maps `confirm` → `confirm_enum`, `select` → `select_one`, `multiselect` → `select_many`, `input` → `free_text`, and `questions[]` batch mode to multiple adapted questions.
+- Added shared `executeQuestionnaire()` function in `index.ts` used by both `AskUserQuestion` and `ask_user` tools, eliminating duplicated execution logic.
+- Added browser editorial document layout with semantic progress band, step markers, choice-row structure with selected state, notes-field wrapper with dashed border, and review ledger with QUESTION/ANSWER/NOTES labels (`061f3a4`).
+- Added browser dark mode with CSS custom properties, `data-theme` attribute on `<html>`, native control `color-scheme`, and a theme toggle (auto/light/dark) (`c3c1790`, `7ade39f`).
+- Added browser single-question / all-questions layout toggle (`c3c1790`).
+- Added browser row-click option selection (radio clears siblings, checkbox toggles) and progress-step click to exit review mode (`c3c1790`).
+- Added browser confirm submit screen with Back navigation to return to the questionnaire (`5bf4205`).
+- Added browser submitted receipt screen with structured answer display and cancelable auto-close countdown timer (`b218475`).
+
+### Fixed
+
+- Fixed keyboard handling bugs and added 250ms submit debounce to prevent accidental rapid submits (`dae3b54`).
+- Fixed Submit tab to show clear required-answer feedback before allowing submission (`e4b19bf`).
+- Fixed browser dark mode controls and review navigation styling (`46cdd3d`).
+- Fixed browser theme application to target `<html>` document root instead of `<body>` so `color-scheme` affects native controls (`7ade39f`).
+- Fixed browser sync server leak: all active per-call servers are now stopped on `session_shutdown` event (`e1036ed`).
+- Fixed option status markers (■/▣/□) alignment after numbered options in the tab bar (`de76abe`).
+- Fixed Other checkmark rendering order — now renders after the option number, not before (`61501a9`).
+- Fixed inline cursor rendering at editor line position instead of always at end of text (`41868c7`, `86c7777`).
+- Fixed bracket character typing in TUI Other editor (`d2c1652`).
+- Fixed focused browser inputs to remain stable across WebSocket re-renders (`cc25ac2`, `2be039c`).
+- Fixed saved option checkmark rendering to be independent of the selection cursor (`46f59e9`).
+- Fixed single-choice options to use emoji pointing-hand cursor and saved answers to use blue checkmark (`7788657`, `cbb661b`).
+- Fixed saved option checkmarks against edge cases with raw string answers from browser sync (`a5658d1`).
+- Fixed browser submit review tab to sync from TUI tab changes (`db2e260`).
+- Fixed browser Other draft text preservation during option sync updates (`b1bf176`).
+- Fixed `confirm_enum` Other sentinel value handling in browser client (`8ba754b`).
+- Fixed single-choice options to use text cursor instead of pointer (`6898988`).
+- Fixed choice cursor emoji to render outside ANSI styling spans (`f05dc87`).
+- Fixed browser Other answer sync to send structured `ChoiceAnswer` instead of raw strings (`9227c76`).
+- Fixed `confirm_enum` value normalization to lowercase in browser and `coerceAnswer` (`04b797f`, `caa572e`).
+- Removed cancel button from browser UI; replaced with helper text (`c3c1790`).
+
+### Changed
+
+- Changed browser assets to be served dynamically from `dist/browser-assets/` instead of static file serving (`3727bb5`).
+- Refactored `src/index.ts` to extract shared questionnaire execution logic into `executeQuestionnaire()`, used by both `AskUserQuestion` and the new `ask_user` adapter tool (`7477051`).
+
+### Testing
+
+- 140 node tests passing (TUI render, browser server, settings, side effects).
+- 127 pytest cases passing (schema, normalize, answers, settings menu, TUI integration).
+- 267 total tests, all green.
+
 ## [2.0.0] - 2026-06-19
 
 ### Added
