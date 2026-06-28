@@ -3,18 +3,18 @@
 
 # Run all tests.
 test:
-    npm test
+    pnpm test
 
 # Build TypeScript + copy browser assets.
 build:
-    npm run build
+    pnpm run build
 
 # Full CI gate: build + test.
 ci: build test
 
 # Install deps.
 install:
-    npm install
+    pnpm install
 
 # Cut a release: gate, bump package.json, commit, tag, and push.
 # Pushing the vX.Y.Z tag triggers .github/workflows/release.yml, which
@@ -34,7 +34,7 @@ release VERSION:
         exit 1
     fi
     just ci
-    tag="$(npm version "{{VERSION}}" -m "chore: release %s")"
+    tag="$(pnpm version "{{VERSION}}" -m "chore: release %s")"
     git push origin master
     git push origin "$tag"
     echo "Pushed $tag — CI will publish to npm and create the GitHub Release."

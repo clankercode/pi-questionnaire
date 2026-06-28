@@ -19,17 +19,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
-          cache: npm
+          cache: pnpm
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       # Re-run the full gate: never publish a tag that doesn't pass.
-      - run: npm run build
-      - run: npm test
+      - run: pnpm run build
+      - run: pnpm test
 
       # Guard: the tag must match the version in package.json.
       - name: Verify tag matches package version
@@ -42,16 +44,12 @@ jobs:
           fi
           echo "Releasing $pkg"
 
-      # Trusted publishing requires npm >= 11.5.1; Node 22 ships npm 10.
-      - name: Upgrade npm (for OIDC trusted publishing)
-        run: npm install -g npm@latest
-
-      # No NODE_AUTH_TOKEN: npm exchanges the GitHub OIDC token for a
+      # No NODE_AUTH_TOKEN: pnpm/npm exchanges the GitHub OIDC token for a
       # short-lived publish token and attaches build provenance automatically.
       # Configure the trusted publisher once at
       # https://www.npmjs.com/package/pi-questionnaire/access.
       - name: Publish to npm
-        run: npm publish
+        run: pnpm publish --no-git-checks
 
       - name: Create GitHub Release
         env:
