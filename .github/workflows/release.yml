@@ -46,12 +46,12 @@ jobs:
           fi
           echo "Releasing $pkg"
 
-      # No NODE_AUTH_TOKEN: pnpm/npm exchanges the GitHub OIDC token for a
-      # short-lived publish token and attaches build provenance automatically.
-      # Configure the trusted publisher once at
-      # https://www.npmjs.com/package/pi-questionnaire/access.
+      # npm (not pnpm) is required for OIDC trusted publishing.
+      - name: Upgrade npm (for OIDC trusted publishing)
+        run: npm install -g npm@latest
+
       - name: Publish to npm
-        run: pnpm publish --no-git-checks --ignore-scripts
+        run: npm publish --ignore-scripts
 
       - name: Create GitHub Release
         env:
