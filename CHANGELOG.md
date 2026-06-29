@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
+## [2.1.3] - 2026-06-30
+
+### Added
+
+- Browser markdown previews now render with **snarkdown** (vendored ~2 KB UMD), replacing the brittle hand-rolled regex renderer. Adds support for italics, strikethrough, fenced code blocks, ordered/unordered lists, blockquotes, links, images, horizontal rules, and nested formatting (previously only headings/bold/inline-code/newlines were handled) (`ee18049`).
+
+### Fixed
+
+- **Markdown preview rendering** — the bold regex `**...**` had been written as `/\\*\\*(.*?)\\*\\*/g` (literal backslash before each `*`), which matched the empty string at every position and inserted `<strong></strong>` between every character. This corrupted the entire HTML stream, causing headings, entities, and code spans to render as literal text. Root cause of the broken-preview reports (`f129195`).
+- **Entity double-escaping** — markdown content emitted with HTML entities (e.g. LLM output like `&#39;` or `&amp;`) now decodes to the intended character before rendering instead of being double-escaped into visible entity codes (`f129195`).
+- **Multi-line markdown** — the `<br>` rule was `/\\n/g` (matches literal backslash-n) instead of `/\n/g`, so newlines never line-broke (`f129195`).
+- **Submit debounce stuck disabled** — the browser submit button stayed on "Please wait..." / disabled forever after entering the review screen. A timer now re-enables the button when the debounce window elapses (the TUI was unaffected because its render loop re-evaluates every tick) (`f129195`).
+- **`e` key in text fields** — pressing `e` while typing in an input/textarea no longer toggles the current option's preview (`f129195`).
+
+### Changed
+
+- Markdown renderer is now defensive: if snarkdown is unavailable or throws, falls back to escaped plain text; `renderPreview` wraps rendering in try/catch so a single bad preview can no longer blank the whole question section (`ee18049`).
+
 ## [2.1.0] - 2026-06-28
 
 ### Highlights
