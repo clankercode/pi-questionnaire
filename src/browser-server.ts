@@ -18,6 +18,7 @@ const BROWSER_ASSET_TYPES: Record<string, string> = {
 	"browser-client.js": "application/javascript; charset=utf-8",
 	"browser-page.html": "text/html; charset=utf-8",
 	"browser-style.css": "text/css; charset=utf-8",
+	"vendor/snarkdown.umd.js": "application/javascript; charset=utf-8",
 };
 
 export interface BrowserOptionsState {

@@ -430,7 +430,7 @@ test("browser assets are served dynamically with no-store caching", async () => 
 	try {
 		const page = await fetchText(handle.url);
 		const styleHref = page.text.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
-		const scriptSrc = page.text.match(/<script src="([^"]+)"[^>]*><\/script>/)?.[1];
+		const scriptSrc = page.text.match(/<script src="([^"]*browser-client\.js[^"]*)"[^>]*><\/script>/)?.[1];
 		assert.ok(styleHref);
 		assert.ok(scriptSrc);
 		const styleUrl = new URL(styleHref, handle.url);

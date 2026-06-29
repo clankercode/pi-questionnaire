@@ -454,6 +454,10 @@ function addChoice(parent,q,i,opt,j,kind){
   if(opt.isOther){ const otherWrap = document.createElement('div'); otherWrap.className = 'choice-other-input'; const other=document.createElement('input'); other.id=otherInputId(q,i); other.type='text'; other.placeholder='Other'; other.value = otherAnswerText(i); other.dataset.focusKey = 'q-'+i+'-other'; other.dataset.inputRole = 'other'; other.onfocus=()=>activateQuestion(i); other.oninput=()=>{ activateQuestion(i); if(kind === 'radio' || other.value) input.checked = true; const value = answerValue(q,i,other); setLocalAnswer(i,value); updateActionLabels(); sendDebounced({type:'answer', questionId:q.id, value}); row.classList.toggle('selected', !!other.value); }; otherWrap.appendChild(other); parent.appendChild(otherWrap); }
 }
 function renderPreview(parent,preview){
+  try { renderPreviewUnsafe(parent,preview); }
+  catch(e){ const d=document.createElement('div'); d.className='preview preview-error'; d.textContent='[preview render error]'; parent.appendChild(d); }
+}
+function renderPreviewUnsafe(parent,preview){
   const box=document.createElement('div'); box.className='preview preview-'+preview.type;
   if(preview.type === 'html' || preview.type === 'svg'){
     const iframe=document.createElement('iframe'); iframe.sandbox=''; iframe.style.width='100%'; iframe.style.minHeight='140px'; iframe.srcdoc=preview.type === 'svg' ? preview.content : preview.content; box.appendChild(iframe);
@@ -467,16 +471,18 @@ function renderPreview(parent,preview){
   parent.appendChild(box);
 }
 function renderMarkdown(markdown){
-  // Decode HTML entities first so content emitted with entities (e.g. LLM output
-  // like `&#39;` or `&amp;`) renders as the intended character instead of being
-  // double-escaped into visible entity codes by escapeHtml below.
-  return escapeHtml(decodeEntities(markdown))
-    .replace(/^### (.*)$/gm,'<h3>$1</h3>')
-    .replace(/^## (.*)$/gm,'<h2>$1</h2>')
-    .replace(/^# (.*)$/gm,'<h1>$1</h1>')
-    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
-    .replace(new RegExp(String.fromCharCode(96)+'([^'+String.fromCharCode(96)+']+)'+String.fromCharCode(96),'g'),'<code>$1</code>')
-    .replace(/\n/g,'<br>');
+  // 1. Decode HTML entities first so content emitted with entities (e.g. LLM
+  //    output like `&#39;` or `&amp;`) is treated as the intended character.
+  // 2. Re-escape `< > & " '` so raw HTML in the input cannot inject tags
+  //    (snarkdown passes non-token text through unescaped — this neutralizes
+  //    XSS). Markdown syntax chars (# * _ ~ ` [ ] ( ) ! > -) are unaffected.
+  // 3. Hand the sanitized string to snarkdown for rendering.
+  // Defensive: if snarkdown isn't loaded yet (or throws), fall back to plain
+  // escaped text so we never throw out of render() and blank the section.
+  const safe = escapeHtml(decodeEntities(markdown));
+  if(typeof window.snarkdown !== 'function') return safe.replace(/\n/g,'<br>');
+  try { return window.snarkdown(safe); }
+  catch(e){ return safe.replace(/\n/g,'<br>'); }
 }
 document.addEventListener('keydown', event => { if(event.key === 'e'){ if(isTextCtrl(document.activeElement)) return; const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }

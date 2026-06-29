@@ -139,6 +139,29 @@ textarea{resize:vertical;min-height:2.5rem}
 
 /* === Preview === */
 .preview{margin:.5rem 0 .75rem;padding:.75rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;white-space:pre-wrap;font-size:.875rem}
+/* Markdown previews are rendered HTML (snarkdown); reset pre-wrap and style tokens. */
+.preview-markdown{white-space:normal;line-height:1.5;word-wrap:break-word}
+.preview-markdown :first-child{margin-top:0}
+.preview-markdown :last-child{margin-bottom:0}
+.preview-markdown h1{font-size:1.25rem;font-weight:700;margin:.6em 0 .3em}
+.preview-markdown h2{font-size:1.1rem;font-weight:700;margin:.6em 0 .3em}
+.preview-markdown h3{font-size:1rem;font-weight:600;margin:.6em 0 .3em}
+.preview-markdown h4,.preview-markdown h5,.preview-markdown h6{font-size:.95rem;font-weight:600;margin:.6em 0 .3em}
+.preview-markdown p{margin:.35em 0}
+.preview-markdown ul,.preview-markdown ol{margin:.35em 0;padding-left:1.4em}
+.preview-markdown li{margin:.15em 0}
+.preview-markdown blockquote{margin:.4em 0;padding:.2em .8em;border-left:3px solid #cbd5e1;color:#475569}
+.preview-markdown code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;background:#eef2f7;padding:.1em .35em;border-radius:2px}
+.preview-markdown pre.code{margin:.4em 0;padding:.6em;background:#eef2f7;border-radius:2px;overflow-x:auto}
+.preview-markdown pre.code code{background:none;padding:0;font-size:.85em}
+.preview-markdown a{color:#4361ee;text-decoration:underline}
+.preview-markdown img{max-width:100%}
+.preview-markdown hr{border:none;border-top:1px solid #cbd5e1;margin:.6em 0}
+[data-theme=dark] .preview-markdown blockquote,[data-theme=auto] .preview-markdown blockquote{border-color:var(--clr-border);color:#94a3b8}
+[data-theme=dark] .preview-markdown code,[data-theme=auto] .preview-markdown code{background:#1e293b}
+[data-theme=dark] .preview-markdown pre.code,[data-theme=auto] .preview-markdown pre.code{background:#1e293b}
+[data-theme=dark] .preview-markdown a,[data-theme=auto] .preview-markdown a{color:var(--clr-accent)}
+[data-theme=dark] .preview-markdown hr,[data-theme=auto] .preview-markdown hr{border-color:var(--clr-border)}
 
 /* === Actions === */
 .actions{display:flex;gap:.75rem;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #e2e8f0}
