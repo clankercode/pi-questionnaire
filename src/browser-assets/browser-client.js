@@ -11,6 +11,16 @@ let awaitingState = !terminalLifecycle;
 let reviewReturnTab = Math.max(0, Math.min(state.questions.length - 1, state.currentTab));
 const SUBMIT_DEBOUNCE_MS = (BOOT && typeof BOOT.submitDebounceMs === 'number') ? BOOT.submitDebounceMs : 250;
 let submitReadyAt = Date.now(); // single-question: already past debounce at mount
+let submitDebounceTimer = null; // re-enables the submit button once the debounce window elapses
+function armSubmitDebounce(ms){
+  submitReadyAt = Date.now() + ms;
+  if(submitDebounceTimer) clearTimeout(submitDebounceTimer);
+  // The button is rendered disabled/'Please wait...' in updateActionLabels();
+  // without this timer nothing re-evaluates after the window expires, so the
+  // button would stay stuck disabled forever in the browser UI.
+  submitDebounceTimer = setTimeout(()=>{ submitDebounceTimer = null; updateActionLabels(); }, ms + 16);
+}
+function disarmSubmitDebounce(){ if(submitDebounceTimer){ clearTimeout(submitDebounceTimer); submitDebounceTimer = null; } }
 const AUTO_CLOSE_SECONDS = 5 * 60;
 let autoCloseRemainingSeconds = AUTO_CLOSE_SECONDS;
 let autoCloseInterval = null;
@@ -41,6 +51,7 @@ function applyLifecycle(lifecycle){
   state.lifecycle = lifecycle;
   if(lifecycle !== 'open'){
     terminalLifecycle = true;
+    disarmSubmitDebounce();
     clearTimeout(reconnectTimer);
     setOverlayPending(false);
     document.getElementById('status').textContent = lifecycle === 'submitted' ? 'Submitted' : 'Cancelled';
@@ -212,8 +223,8 @@ function answerValue(q,i,el){
 function setTab(i){ state.currentTab = i; if(i < state.questions.length) reviewReturnTab = i; send({type:'tab', currentTab:i}); updateActiveQuestionClasses(); }
 function isReviewTab(){ return state.currentTab === state.questions.length; }
 function reviewBackTab(){ return Math.max(0, Math.min(state.questions.length - 1, reviewReturnTab)); }
-function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); submitReadyAt = Date.now() + SUBMIT_DEBOUNCE_MS; setTab(state.questions.length); render(); }
-function returnFromSubmitReview(){ setTab(reviewBackTab()); render(); }
+function showSubmitReview(){ flushDebounced(); reviewReturnTab = state.currentTab < state.questions.length ? state.currentTab : reviewBackTab(); armSubmitDebounce(SUBMIT_DEBOUNCE_MS); setTab(state.questions.length); render(); }
+function returnFromSubmitReview(){ disarmSubmitDebounce(); setTab(reviewBackTab()); render(); }
 function confirmSubmit(){ if(!allAnswered()){ updateActionLabels(); return; } if(Date.now() < submitReadyAt) return; flushDebounced(); send({type:'submit'}); }
 function activateQuestion(i){ if(state.currentTab !== i) setTab(i); }
 function isTextValueControl(el){
@@ -456,15 +467,18 @@ function renderPreview(parent,preview){
   parent.appendChild(box);
 }
 function renderMarkdown(markdown){
-  return escapeHtml(markdown)
+  // Decode HTML entities first so content emitted with entities (e.g. LLM output
+  // like `&#39;` or `&amp;`) renders as the intended character instead of being
+  // double-escaped into visible entity codes by escapeHtml below.
+  return escapeHtml(decodeEntities(markdown))
     .replace(/^### (.*)$/gm,'<h3>$1</h3>')
     .replace(/^## (.*)$/gm,'<h2>$1</h2>')
     .replace(/^# (.*)$/gm,'<h1>$1</h1>')
-    .replace(/\\*\\*(.*?)\\*\\*/g,'<strong>$1</strong>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
     .replace(new RegExp(String.fromCharCode(96)+'([^'+String.fromCharCode(96)+']+)'+String.fromCharCode(96),'g'),'<code>$1</code>')
-    .replace(/\\n/g,'<br>');
+    .replace(/\n/g,'<br>');
 }
-document.addEventListener('keydown', event => { if(event.key === 'e'){ const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
+document.addEventListener('keydown', event => { if(event.key === 'e'){ if(isTextCtrl(document.activeElement)) return; const key = document.activeElement?.dataset?.previewKey || firstPreviewKeyForCurrentQuestion(); if(key){ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); } } });
 function firstPreviewKeyForCurrentQuestion(){ const q=state.questions[state.currentTab]; if(!q) return null; const opts=state.renderOptions[String(state.currentTab)] || q.options || []; const idx=opts.findIndex(opt=>opt.preview); return idx === -1 ? null : q.id+':'+idx; }
 
 /* === Theme Toggle === */
@@ -501,5 +515,6 @@ document.getElementById('next-btn').onclick = () => { goNext(); };
 document.getElementById('theme-toggle').onclick = () => { toggleTheme(); };
 document.getElementById('layout-toggle').onclick = () => { toggleLayout(); };
 document.addEventListener('keydown', event => { if(event.key==='Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && isSingleMode() && !isReviewTab() && isTextCtrl(document.activeElement)){ event.preventDefault(); goNext(); } });
+function decodeEntities(s){ const e=document.createElement('textarea'); e.innerHTML=String(s); return e.value; }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);
