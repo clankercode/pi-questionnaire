@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
-## [Unreleased]
+## [2.1.4] - 2026-07-07
 
 ### Added
 
