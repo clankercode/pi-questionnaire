@@ -251,6 +251,11 @@ async function main() {
 					tmpDir,
 					getSettingsOverride: settingsOverride,
 					log: (line) => logBuf.push(line),
+					// Default to empty ("not in herdr") so tests are hermetic and
+					// don't accidentally inherit the host's HERDR_ENV. Tests opt
+					// into a herdr pane by passing herdrEnv/herdrPaneId on the cmd.
+					herdrEnv: (cmd.herdrEnv as string | undefined) ?? "",
+					herdrPaneId: (cmd.herdrPaneId as string | undefined) ?? "",
 				});
 
 				// If cmd.tickHeartbeat is true, run one heartbeat tick to

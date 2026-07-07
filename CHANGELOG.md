@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
+## [Unreleased]
+
+### Added
+
+- **Herdr `blocked` status** — when inside a [herdr](https://herdr.dev)-managed pane and the new `herdrReportBlocked` setting is on (default `true`), the extension reports the pane as `blocked` (with `custom-status "answering question"`) for the duration of an `AskUserQuestion`/`ask_user` TUI, and releases the authority on answer/cancel/throw. No-op outside herdr. Surfaces the agent-waiting-on-human state in herdr's sidebar, waits, and rollups.
+
 ## [2.1.3] - 2026-06-30
 
 ### Added

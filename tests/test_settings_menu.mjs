@@ -96,10 +96,10 @@ test("buildSettingsMenuComponent returns render/handleInput/dispose", () => {
 	assert.equal(typeof component.invalidate, "function");
 });
 
-test("DEFAULT_SECTIONS has 5 sections covering all 13 fields", () => {
-	assert.equal(DEFAULT_SECTIONS.length, 5);
+test("DEFAULT_SECTIONS has 6 sections covering all 14 fields", () => {
+	assert.equal(DEFAULT_SECTIONS.length, 6);
 	const totalSettings = DEFAULT_SECTIONS.reduce((n, s) => n + s.settings.length, 0);
-	assert.equal(totalSettings, 13, "expected 13 settings across 5 sections");
+	assert.equal(totalSettings, 14, "expected 14 settings across 6 sections");
 	const titles = DEFAULT_SECTIONS.map((s) => s.title);
 	assert.deepEqual(titles, [
 		"Browser",
@@ -107,6 +107,7 @@ test("DEFAULT_SECTIONS has 5 sections covering all 13 fields", () => {
 		"TTS & Command",
 		"Heartbeat & Debounce",
 		"Question display",
+		"Integrations",
 	]);
 });
 

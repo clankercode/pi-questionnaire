@@ -23,6 +23,10 @@
 //     → start a `.unref()`-ed setInterval that calls `pi.sendMessage`
 //     with a stable customType and `deliverAs: "followUp"`. Cleared by
 //     the handle when the TUI settles.
+//   - herdrReportBlocked
+//     → when inside a herdr-managed pane (HERDR_ENV=1 + HERDR_PANE_ID),
+//       spawn `herdr pane report-agent ... --state blocked` on mount and
+//       `herdr pane release-agent ...` on clear(). No-op outside herdr.
 //   - dangerCheckEnabled
 //     → just logs "enabled" / "disabled". The TUI's is_dangerous flow
 //     reads the setting directly from getSettings().
@@ -79,6 +83,11 @@ export interface SideEffectDeps {
 	clearTimeout?: typeof clearTimeout;
 	platform?: NodeJS.Platform;
 	tmpDir?: string;
+	/** herdr env detection. Default: process.env.HERDR_ENV ("1" inside a
+	 * herdr-managed pane). Tests override to simulate being in herdr. */
+	herdrEnv?: string;
+	/** herdr pane id. Default: process.env.HERDR_PANE_ID. */
+	herdrPaneId?: string;
 	/** Override the getSettings() result. Useful for tests; production
 	 * leaves this undefined and reads the live view. */
 	getSettingsOverride?: AskUserQuestionSettings;
@@ -91,7 +100,8 @@ export interface SideEffectDeps {
 export interface SideEffectHandle {
 	/** Names of effects that fired (in execution order). Names:
 	 *   "browserEnabled", "browserAutoOpen", "copyUrlToClipboard",
-	 *   "notification", "tts", "command", "heartbeat", "dangerCheck". */
+	 *   "notification", "tts", "command", "heartbeat", "herdr",
+	 *   "dangerCheck" (dangerCheck is logged, not pushed). */
 	effects: string[];
 	/** Path to the temp file written for onQuestionCommand, or null. */
 	payloadFile: string | null;
@@ -157,6 +167,57 @@ export function clipboardCommand(
 	if (platform === "darwin") return { cmd: "pbcopy", args: [] };
 	if (platform === "win32") return { cmd: "clip", args: [] };
 	return { cmd: "xclip", args: ["-selection", "clipboard"] };
+}
+
+// -- herdr (agent multiplexer) blocked-status reporting -----------------
+//
+// While a questionnaire is on screen the agent is blocked on human input.
+// Reporting `blocked` to herdr makes the sidebar dot, `herdr wait
+// agent-status`, notifications, and workspace rollups reflect that. Outside
+// a herdr-managed pane this is a no-op (see HERDR_ENV / HERDR_PANE_ID).
+
+/** Source identity. The `user:` prefix marks a non-authority hook; the
+ * `--agent pi` guard restricts the report to while pi is the active pane
+ * agent. */
+export const HERDR_SOURCE = "user:pi-questionnaire";
+/** Agent label — the extension only runs inside pi. */
+export const HERDR_AGENT = "pi";
+/** Short visual label next to the blocked dot (herdr caps at 32 chars). */
+export const HERDR_CUSTOM_STATUS = "answering question";
+
+/** Build the `herdr pane report-agent` command that marks the pane
+ * `blocked` while the questionnaire is on screen. */
+export function herdrReportCommand(
+	paneId: string,
+	header: string,
+): { cmd: string; args: string[] } {
+	return {
+		cmd: "herdr",
+		args: [
+			"pane", "report-agent", paneId,
+			"--source", HERDR_SOURCE,
+			"--agent", HERDR_AGENT,
+			"--state", "blocked",
+			"--custom-status", HERDR_CUSTOM_STATUS,
+			"--message", `AskUserQuestion: ${header || "Question"}`,
+		],
+	};
+}
+
+/** Build the `herdr pane release-agent` command that restores the pane's
+ * prior status authority when the questionnaire ends (answered, cancelled,
+ * or thrown). */
+export function herdrReleaseCommand(
+	paneId: string,
+): { cmd: string; args: string[] } {
+	return {
+		cmd: "herdr",
+		args: [
+			"pane", "release-agent", paneId,
+			"--source", HERDR_SOURCE,
+			"--agent", HERDR_AGENT,
+		],
+	};
 }
 
 function commandExists(cmd: string, platform: NodeJS.Platform, doSpawnSync: typeof spawnSync): boolean {
@@ -250,10 +311,16 @@ export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMess
 
 	const firstHeader = params.questions[0]?.header || "Question";
 
+	// herdr env detection (overridable by tests). Outside a herdr pane
+	// both are absent and the blocked-status effect below is a no-op.
+	const herdrEnv = deps.herdrEnv ?? process.env.HERDR_ENV;
+	const herdrPaneId = deps.herdrPaneId ?? process.env.HERDR_PANE_ID;
+
 	let heartbeatHandle: ReturnType<typeof setInterval> | null = null;
 	let heartbeatStarted = false;
 	let notificationTimer: ReturnType<typeof setTimeout> | null = null;
 	let payloadFile: string | null = null;
+	let herdrArmed = false;
 	let cleared = false;
 
 	function unref(t: { unref?: () => void } | null | undefined): void {
@@ -281,6 +348,18 @@ export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMess
 	function clear(): void {
 		if (cleared) return;
 		cleared = true;
+		if (herdrArmed) {
+			herdrArmed = false;
+			if (typeof herdrPaneId === "string" && herdrPaneId.length > 0) {
+				try {
+					const { cmd, args } = herdrReleaseCommand(herdrPaneId);
+					const child = doSpawn(cmd, args, { detached: true, stdio: "ignore" });
+					detach(child);
+				} catch (err) {
+					log(`herdr release-agent failed: ${(err as Error).message}`);
+				}
+			}
+		}
 		if (heartbeatHandle !== null) {
 			try {
 				doClearInterval(heartbeatHandle);
@@ -413,7 +492,31 @@ export function fireOnQuestionSideEffects<P extends Pick<ExtensionAPI, "sendMess
 		effects.push("heartbeat");
 	}
 
-	// -- 6. dangerCheckEnabled (logged; TUI reads it itself) -------------
+	// -- 6. Herdr blocked status -----------------------------------------
+	// Inside a herdr-managed pane, report `blocked` so the sidebar dot,
+	// waits, notifications, and rollups reflect that the agent is waiting
+	// on a human. No-op outside herdr (HERDR_ENV / HERDR_PANE_ID absent).
+	// Armed here, released in clear() via release-agent. report-agent has
+	// no TTL, so release is the restore path; the --agent pi guard also
+	// drops the report if pi exits first.
+	if (
+		settings.herdrReportBlocked &&
+		herdrEnv === "1" &&
+		typeof herdrPaneId === "string" &&
+		herdrPaneId.length > 0
+	) {
+		effects.push("herdr");
+		herdrArmed = true;
+		try {
+			const { cmd, args } = herdrReportCommand(herdrPaneId, firstHeader);
+			const child = doSpawn(cmd, args, { detached: true, stdio: "ignore" });
+			detach(child);
+		} catch (err) {
+			log(`herdr report-agent failed: ${(err as Error).message}`);
+		}
+	}
+
+	// -- 7. dangerCheckEnabled (logged; TUI reads it itself) -------------
 	log(`danger check: ${settings.dangerCheckEnabled ? "enabled" : "disabled"}`);
 	// We do NOT push "dangerCheck" into effects — it's not a fire-able
 	// action, just a status. Tests assert on the log instead.

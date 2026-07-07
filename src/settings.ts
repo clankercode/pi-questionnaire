@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 // --------------------------------------------------------------------------
-// Interface (all 13 fields defined up front so future menu work has a stable
+// Interface (all 14 fields defined up front so future menu work has a stable
 // shape; only `bellOnQuestion` is wired into behavior today).
 // --------------------------------------------------------------------------
 
@@ -50,6 +50,9 @@ export interface AskUserQuestionSettings {
 	debounceMs?: number;
 	/** Show a confirmation prompt before destructive commands are executed. */
 	dangerCheckEnabled?: boolean;
+	/** Report `blocked` to herdr (agent multiplexer) while a questionnaire is
+	 * on screen. No-ops outside a herdr-managed pane. */
+	herdrReportBlocked?: boolean;
 }
 
 // --------------------------------------------------------------------------
@@ -71,6 +74,7 @@ export const DEFAULT_SETTINGS: Required<AskUserQuestionSettings> = {
 	heartbeatIntervalMinutes: 4.5,
 	debounceMs: 300,
 	dangerCheckEnabled: true,
+	herdrReportBlocked: true,
 };
 
 // Sanity ceilings — prevent hand-edited configs from asking for values that
@@ -151,6 +155,7 @@ function sanitize(raw: unknown): AskUserQuestionSettings {
 		out.debounceMs = r.debounceMs as number;
 	}
 	if (typeof r.dangerCheckEnabled === "boolean") out.dangerCheckEnabled = r.dangerCheckEnabled;
+	if (typeof r.herdrReportBlocked === "boolean") out.herdrReportBlocked = r.herdrReportBlocked;
 
 	return out;
 }

@@ -129,7 +129,7 @@ def test_apply_change_to_global_only_field_creates_project_file(
 def test_apply_partial_patch_preserves_other_fields_in_file(
     fresh_cwd: str, empty_global_dir: str
 ):
-    """A 1-field patch writes a file that contains ALL 13 fields (full merged view).
+    """A 1-field patch writes a file that contains ALL 14 fields (full merged view).
 
     The patch is conceptually `{ bellOnQuestion: false }`, but the file
     is written with the full merged view: every field is present, with
@@ -138,7 +138,7 @@ def test_apply_partial_patch_preserves_other_fields_in_file(
     r = _apply({"bellOnQuestion": False}, cwd=fresh_cwd, global_dir=empty_global_dir)
     assert r["ok"] is True
     fc = r["fileContent"]
-    # All 13 fields must be present.
+    # All 14 fields must be present.
     expected_fields = {
         "browserEnabled",
         "browserAutoOpen",
@@ -153,6 +153,7 @@ def test_apply_partial_patch_preserves_other_fields_in_file(
         "heartbeatIntervalMinutes",
         "debounceMs",
         "dangerCheckEnabled",
+        "herdrReportBlocked",
     }
     assert set(fc.keys()) == expected_fields, (
         f"file keys {set(fc.keys())} != expected {expected_fields}"

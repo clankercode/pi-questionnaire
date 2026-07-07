@@ -264,7 +264,7 @@ On submit, notes flow back to the model alongside the answers:
 
 ## Settings reference
 
-All 13 settings fields, with defaults from `src/settings.ts`:
+All 14 settings fields, with defaults from `src/settings.ts`:
 
 | Field                       | Type      | Default | Range / shape        | Description                                                                                  |
 |-----------------------------|-----------|---------|----------------------|----------------------------------------------------------------------------------------------|
@@ -281,6 +281,7 @@ All 13 settings fields, with defaults from `src/settings.ts`:
 | `heartbeatIntervalMinutes`  | number    | `4.5`   | 0.5–60               | Idle interval in minutes (matches pi's default 4.5m heartbeat)                               |
 | `debounceMs`                | integer   | `300`   | 0–10 000             | Debounce (ms) when typing into number/free_text inputs                                       |
 | `dangerCheckEnabled`        | boolean   | `true`  | —                    | Enforce the `is_dangerous` typed-confirmation flow in the TUI                                |
+| `herdrReportBlocked`        | boolean   | `true`  | —                    | Inside a herdr-managed pane, report `blocked` while a question is on screen; release on done. No-op outside herdr. |
 
 Settings are read live on every `execute()` call, so editing the JSON file and re-asking takes effect immediately (no pi restart needed).
 

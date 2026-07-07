@@ -1,6 +1,6 @@
 """Side-effects tests — exercises src/side-effects.ts via the TS harness.
 
-The v2 settings in src/settings.ts define 13 fields. This suite asserts
+The v2 settings in src/settings.ts define 14 fields. This suite asserts
 that `fireOnQuestionSideEffects` (called at the start of `execute()`)
 fires the right side effect for each one — gating on the setting value
 and never throwing, even when a child process can't be spawned.
@@ -52,6 +52,7 @@ DEFAULT_TEST_SETTINGS = {
     "heartbeatIntervalMinutes": 4.5,
     "debounceMs": 300,
     "dangerCheckEnabled": True,
+    "herdrReportBlocked": True,
 }
 
 
@@ -411,3 +412,115 @@ def test_payload_file_actually_written_and_readable():
         with open(path) as f:
             data = json.load(f)
         assert data["questions"][0]["header"] == "Persist"
+
+
+# --- 12. herdr blocked status -------------------------------------------
+# While a questionnaire is on screen the agent is blocked on human input.
+# When inside a herdr-managed pane (HERDR_ENV=1 + HERDR_PANE_ID) and the
+# setting is on, the side effect spawns `herdr pane report-agent
+# --state blocked` on mount and `herdr pane release-agent` on clear().
+# Outside herdr it is a no-op. The harness defaults herdrEnv/herdrPaneId to
+# empty so tests are hermetic regardless of the host shell.
+
+HERDR_PANE = "w1:p1"
+
+
+def _herdr_spawns(r, sub):
+    """herdr spawns whose args contain `sub` (e.g. 'report-agent')."""
+    return [s for s in _spawn_records(r) if s["cmd"] == "herdr" and sub in s["args"]]
+
+
+def _flag(args, name):
+    """Value following a --flag in an args list."""
+    return args[args.index(name) + 1]
+
+
+def test_herdr_off_does_not_spawn():
+    r = _fire([CONFIRM_Q], settings={"herdrReportBlocked": False}, herdrEnv="1", herdrPaneId=HERDR_PANE)
+    assert "herdr" not in r["effects"]
+    assert _herdr_spawns(r, "report-agent") == []
+
+
+def test_herdr_on_but_not_in_herdr_pane_no_spawn():
+    # Setting on, but not inside a herdr pane → no-op.
+    r = _fire([CONFIRM_Q], settings={"herdrReportBlocked": True})
+    assert "herdr" not in r["effects"]
+    assert _herdr_spawns(r, "report-agent") == []
+
+
+def test_herdr_on_in_herdr_reports_blocked():
+    r = _fire(
+        [CONFIRM_Q],
+        settings={"herdrReportBlocked": True},
+        herdrEnv="1",
+        herdrPaneId=HERDR_PANE,
+    )
+    assert "herdr" in r["effects"]
+    reports = _herdr_spawns(r, "report-agent")
+    assert len(reports) == 1
+    args = reports[0]["args"]
+    assert args[:3] == ["pane", "report-agent", HERDR_PANE]
+    assert _flag(args, "--source") == "user:pi-questionnaire"
+    assert _flag(args, "--agent") == "pi"
+    assert _flag(args, "--state") == "blocked"
+    assert _flag(args, "--custom-status") == "answering question"
+    assert _flag(args, "--message") == "AskUserQuestion: Deploy"
+
+
+def test_herdr_report_uses_first_header():
+    r = _fire(
+        [
+            {"header": "First", "question": "?", "type": "confirm_enum"},
+            {"header": "Second", "question": "?", "type": "confirm_enum"},
+        ],
+        settings={"herdrReportBlocked": True},
+        herdrEnv="1",
+        herdrPaneId=HERDR_PANE,
+    )
+    reports = _herdr_spawns(r, "report-agent")
+    assert _flag(reports[0]["args"], "--message") == "AskUserQuestion: First"
+
+
+def test_herdr_clear_releases_authority():
+    r = _fire(
+        [CONFIRM_Q],
+        settings={"herdrReportBlocked": True},
+        herdrEnv="1",
+        herdrPaneId=HERDR_PANE,
+        doClear=True,
+    )
+    assert r["cleared"] is True
+    assert len(_herdr_spawns(r, "report-agent")) == 1
+    releases = _herdr_spawns(r, "release-agent")
+    assert len(releases) == 1
+    args = releases[0]["args"]
+    assert args[:3] == ["pane", "release-agent", HERDR_PANE]
+    assert _flag(args, "--source") == "user:pi-questionnaire"
+    assert _flag(args, "--agent") == "pi"
+
+
+def test_herdr_clear_when_not_armed_no_release():
+    # Not in herdr → never armed → clear() must not spawn release-agent.
+    r = _fire([CONFIRM_Q], settings={"herdrReportBlocked": True}, doClear=True)
+    assert _herdr_spawns(r, "release-agent") == []
+    assert _herdr_spawns(r, "report-agent") == []
+
+
+def test_herdr_report_spawn_failure_is_caught():
+    r = _fire(
+        [CONFIRM_Q],
+        settings={"herdrReportBlocked": True},
+        herdrEnv="1",
+        herdrPaneId=HERDR_PANE,
+        mockSpawn=True,
+        mockSpawnThrows=True,
+    )
+    assert "herdr" in r["effects"]
+    assert any("herdr report-agent failed" in line for line in _log(r))
+
+
+def test_herdr_default_on_but_no_env_no_spawn():
+    # Defaults: herdrReportBlocked is true, but no herdr env → no spawn.
+    r = _fire([CONFIRM_Q])
+    assert _herdr_spawns(r, "report-agent") == []
+    assert "herdr" not in r["effects"]

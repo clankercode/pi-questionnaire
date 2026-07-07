@@ -1,8 +1,8 @@
 // src/settings-menu.ts
 // Settings menu for the AskUserQuestion pi extension.
 //
-// Surfaces the 13 settings in src/settings.ts under the slash command
-// /settings-ask-user-question. Two-level TUI: a section picker (5
+// Surfaces the 14 settings in src/settings.ts under the slash command
+// /settings-ask-user-question. Two-level TUI: a section picker (6
 // groups) and per-section setting lists. Boolean settings toggle with
 // Space; number / string settings open an inline Editor that commits on
 // Enter and validates on submit.
@@ -138,6 +138,18 @@ export const DEFAULT_SECTIONS: SectionDef[] = [
 		settings: [
 			{ id: "bellOnQuestion", label: "Audible bell on question", type: "boolean" },
 			{ id: "dangerCheckEnabled", label: "Danger check enabled", type: "boolean" },
+		],
+	},
+	{
+		title: "Integrations",
+		settings: [
+			{
+				id: "herdrReportBlocked",
+				label: "Report blocked to herdr",
+				type: "boolean",
+				description:
+					"While in a herdr-managed pane, mark this pane 'blocked' until the question is answered.",
+			},
 		],
 	},
 ];

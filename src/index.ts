@@ -353,7 +353,7 @@ export default function (pi: ExtensionAPI) {
 
 /**
  * Register `/settings-ask-user-question` — a two-level TUI menu (section
- * picker → setting list) that lets the user tweak the 13 fields in
+ * picker → setting list) that lets the user tweak the 14 fields in
  * src/settings.ts. Each change is persisted to <cwd>/.pi/ask-user-question.json
  * via the existing saveSettings() path.
  *

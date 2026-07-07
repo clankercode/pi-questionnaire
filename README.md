@@ -2,7 +2,7 @@
 
 Claude Code-compatible `AskUserQuestion` tool for the [pi](https://github.com/earendil-works/pi-mono) coding agent.
 
-Replaces v1's `ask_user` with the same shape Claude Code uses — five question types, per-question notes, persistent checkmarks, rich previews, a typed-confirmation "danger" flow for destructive actions, and per-setting side effects (BEL, desktop notification, TTS, custom command, idle heartbeat, browser-intent log) wired through a 13-field settings module.
+Replaces v1's `ask_user` with the same shape Claude Code uses — five question types, per-question notes, persistent checkmarks, rich previews, a typed-confirmation "danger" flow for destructive actions, and per-setting side effects (BEL, desktop notification, TTS, custom command, idle heartbeat, browser-intent log, herdr blocked-status) wired through a 14-field settings module.
 
 ## Screenshots
 
@@ -104,7 +104,7 @@ The TUI then renders a `⚠️  DESTRUCTIVE` header and forces the user to type 
 
 Press `Tab` (or `n`) on a question to swap to a notes editor. Notes are independent of the answer, so you can annotate an answered question, a multi-select, or a danger flow. On submit, notes flow back to the model under the same `notes` key in the tool result.
 
-## Settings (13 fields, grouped)
+## Settings (14 fields, grouped)
 
 Configured via `<agentDir>/ask-user-question.json` (global) and/or `<cwd>/.pi/ask-user-question.json` (project). Project overrides global. Defaults from `src/settings.ts`:
 
@@ -123,10 +123,33 @@ Configured via `<agentDir>/ask-user-question.json` (global) and/or `<cwd>/.pi/as
 |              | `heartbeatIntervalMinutes`  | `4.5`   | Idle interval in minutes (0.5–60)                    |
 | **Input**    | `debounceMs`                | `300`   | Debounce (ms) when typing into number/free_text      |
 | **Safety**   | `dangerCheckEnabled`        | `true`  | Enforce the `is_dangerous` typed-confirmation flow   |
+| **Integrations** | `herdrReportBlocked`    | `true`  | Mark the herdr pane `blocked` while a question is on screen (no-op outside herdr) |
 
 Full reference (types, ranges, behavior): [docs/USAGE.md#settings-reference](docs/USAGE.md#settings-reference).
 
 The settings menu is available via the menu command in pi (slash name will land with the menu UI in a separate slice — see `docs/USAGE.md` for now). Until then, hand-edit the JSON files.
+
+## Herdr integration
+
+[Herdr](https://herdr.dev) is a terminal agent multiplexer that shows each pane's semantic state — `working`, `blocked`, `done`, `idle` — in a sidebar so you can see which agent needs attention. While an `AskUserQuestion`/`ask_user` TUI is on screen the agent is **blocked waiting on a human**, so pi-questionnaire tells herdr exactly that.
+
+When `herdrReportBlocked` is on (the default) and the process is inside a herdr-managed pane (`HERDR_ENV=1` + `HERDR_PANE_ID`), the extension runs, on mount:
+
+```bash
+herdr pane report-agent "$HERDR_PANE_ID" \
+  --source user:pi-questionnaire --agent pi --state blocked \
+  --custom-status "answering question" --message "AskUserQuestion: <header>"
+```
+
+and, when the questionnaire is answered / cancelled / thrown:
+
+```bash
+herdr pane release-agent "$HERDR_PANE_ID" --source user:pi-questionnaire --agent pi
+```
+
+The release restores the pane's prior status authority. Reports are fire-and-forget and never break the tool; outside herdr the whole feature is a no-op. This works whether or not you have the official `herdr integration install pi` lifecycle extension installed — pi-questionnaire's report is the most authoritative source for "a question is on screen right now."
+
+Verify from another pane with `herdr agent list` (look for `agent_status: "blocked"` + `custom_status: "answering question"`) or `herdr wait agent-status <pane> --status blocked`.
 
 ## Keymap
 
@@ -182,7 +205,7 @@ src/
   types.ts          # canonical types + constants (MAX_*, label names)
   answers.ts        # answer payload coercion/validation
   tui.ts            # rich TUI (notes, checkmarks, danger flow, preview, help)
-  settings.ts       # 13-field settings persistence (global + project merge)
+  settings.ts       # 14-field settings persistence (global + project merge)
   side-effects.ts   # on-question side effects (notification, TTS, command, heartbeat)
 tests/
   harness.ts        # TS CLI that drives the pytest suite

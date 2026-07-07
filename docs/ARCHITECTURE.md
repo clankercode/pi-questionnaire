@@ -12,7 +12,7 @@ src/
   types.ts          → canonical types + constants (MAX_*, label names, type guards)
   answers.ts        → answer payload coercion/validation (Claude Code + pag-server shapes)
   tui.ts            → rich TUI component (notes, checkmarks, danger flow, preview, help, timer, title)
-  settings.ts       → 13-field settings persistence (global + project merge, in-memory hook for tests)
+  settings.ts       → 14-field settings persistence (global + project merge, in-memory hook for tests)
   side-effects.ts   → on-question side effects (notification, TTS, command, heartbeat, browser-intent log)
 ```
 
@@ -201,6 +201,7 @@ The `setBrowserUrl()` and `getBrowserOpenAttempt()` hooks are exposed for slice 
 | `onQuestionCommand`                       | Write payload JSON to `os.tmpdir()/ask-user-question-<id>.json`, spawn the command with `PI_QUESTIONNAIRE_PAYLOAD_FILE` env var |
 | `heartbeatWhileActive` + interval         | `setInterval` calling `pi.sendMessage` with `customType:"ask-user-question-heartbeat"`, `deliverAs:"followUp"` |
 | `dangerCheckEnabled`                      | Log "danger check: enabled/disabled" — TUI reads the setting itself                       |
+| `herdrReportBlocked`                      | Inside a herdr pane (`HERDR_ENV=1` + `HERDR_PANE_ID`), spawn `herdr pane report-agent --state blocked` on mount and `herdr pane release-agent` on `clear()`; no-op outside herdr |
 | `debounceMs`                              | Not a side effect; the caller (`index.ts`) puts it on the `ToolResultDetails`             |
 
 All spawns are wrapped in try/catch — **side effects must NEVER break the tool**. The TUI shows even if every side effect fails.
