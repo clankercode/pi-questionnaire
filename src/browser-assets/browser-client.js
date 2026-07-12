@@ -464,9 +464,12 @@ function renderPreviewUnsafe(parent,preview){
   } else if(preview.type === 'markdown'){
     box.innerHTML = renderMarkdown(preview.content);
   } else if(preview.type === 'code'){
-    const pre=document.createElement('pre'); const code=document.createElement('code'); code.textContent=preview.content; pre.appendChild(code); box.appendChild(pre);
+    const pre=document.createElement('pre'); const code=document.createElement('code'); code.innerHTML = ansiToHtml(preview.content); pre.appendChild(code); box.appendChild(pre);
   } else {
-    const pre=document.createElement('pre'); pre.textContent='['+preview.type+']\\n'+preview.content; box.appendChild(pre);
+    // text + any future type without a dedicated renderer: render with
+    // ANSI parsing so colored output (real ESC bytes OR literal \x1b text)
+    // shows as colored HTML. Plain text passes through unchanged.
+    const pre=document.createElement('pre'); pre.innerHTML = ansiToHtml(preview.content); box.appendChild(pre);
   }
   parent.appendChild(box);
 }
@@ -523,4 +526,115 @@ document.getElementById('layout-toggle').onclick = () => { toggleLayout(); };
 document.addEventListener('keydown', event => { if(event.key==='Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && isSingleMode() && !isReviewTab() && isTextCtrl(document.activeElement)){ event.preventDefault(); goNext(); } });
 function decodeEntities(s){ const e=document.createElement('textarea'); e.innerHTML=String(s); return e.value; }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// === ANSI SGR rendering ========================================================
+//
+// Browser preview types "text" and "code" may carry ANSI-colored content
+// (real ESC bytes from tools like `git diff --color`, or literal \x1b text
+// from LLM-authored payloads). Convert to colored HTML spans so the browser
+// preview matches what the in-terminal TUI shows.
+//
+// Mirrors `interpretAnsiEscapes` in src/ansi.ts: literal escape forms
+// (\x1b / \x1B / \u001b / \u001B / \e[ with a non-identifier char after \e)
+// are decoded to real ESC bytes BEFORE SGR parsing, so a single code path
+// handles both authoring styles. Other backslash escapes (\n, \t) are NOT
+// decoded — content is treated as already-decoded by the time it arrives
+// here.
+//
+// Supported SGR codes: reset (0), bold (1), dim (2), italic (3), underline
+// (4), normal intensity/style (22/23/24), 8-color fg/bg (30-37, 40-47),
+// bright fg/bg (90-97, 100-107), default fg/bg (39, 49), 256-color (38;5;N
+// / 48;5;N), and 24-bit color (38;2;R;G;B / 48;2;R;G;B). Other codes are
+// silently ignored.
+//
+// All text runs are HTML-escaped before being injected via innerHTML, so
+// raw HTML / `<script>` in the content cannot inject tags.
+
+const ANSI_FG = ['#000000','#cd3131','#0dbc79','#e5e510','#2472c8','#bc3fbc','#11a8cd','#e5e5e5'];
+const ANSI_BG = ['#000000','#cd3131','#0dbc79','#e5e510','#2472c8','#bc3fbc','#11a8cd','#e5e5e5'];
+const ANSI_FG_BRIGHT = ['#666666','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#ffffff'];
+const ANSI_BG_BRIGHT = ['#666666','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#ffffff'];
+const ANSI_CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
+function ansi256ToCss(n){
+  if(n < 8) return ANSI_FG[n];
+  if(n < 16) return ANSI_FG_BRIGHT[n - 8];
+  if(n >= 232){ const g = 8 + (n - 232) * 10; return 'rgb('+g+','+g+','+g+')'; }
+  n -= 16;
+  const r = ANSI_CUBE_LEVELS[Math.floor(n / 36)];
+  const g = ANSI_CUBE_LEVELS[Math.floor((n % 36) / 6)];
+  const b = ANSI_CUBE_LEVELS[n % 6];
+  return 'rgb('+r+','+g+','+b+')';
+}
+function styleToCss(state){
+  const keys = Object.keys(state);
+  if(keys.length === 0) return '';
+  return keys.map(k => k+': '+state[k]).join('; ');
+}
+function ansiToHtml(s){
+  if(typeof s !== 'string') s = String(s);
+  // Decode literal escape forms first — same regex as src/ansi.ts.
+  s = s.replace(/\\x1[bB]|\\u001[bB]|\\e(?![A-Za-z0-9_])/g, '\x1b');
+  const out = [];
+  let state = {};
+  let buf = '';
+  const flush = () => {
+    if(buf.length === 0) return;
+    const css = styleToCss(state);
+    if(css) out.push('<span style="'+escapeHtml(css)+'">'+escapeHtml(buf)+'</span>');
+    else out.push(escapeHtml(buf));
+    buf = '';
+  };
+  let i = 0;
+  while(i < s.length){
+    if(s.charCodeAt(i) === 0x1b && s[i + 1] === '['){
+      const end = s.indexOf('m', i + 2);
+      if(end === -1){ buf += s[i]; i++; continue; }
+      flush();
+      const paramStr = s.substring(i + 2, end);
+      const codes = paramStr === '' ? [0] : paramStr.split(';').map(p => parseInt(p, 10) || 0);
+      let j = 0;
+      while(j < codes.length){
+        const c = codes[j];
+        if(c === 0) state = {};
+        else if(c === 1) state['font-weight'] = 'bold';
+        else if(c === 2) state['opacity'] = '0.6';
+        else if(c === 3) state['font-style'] = 'italic';
+        else if(c === 4) state['text-decoration'] = 'underline';
+        else if(c === 22) delete state['font-weight'];
+        else if(c === 23) delete state['font-style'];
+        else if(c === 24) delete state['text-decoration'];
+        else if(c === 39) delete state['color'];
+        else if(c === 49) delete state['background-color'];
+        else if(c >= 30 && c <= 37) state['color'] = ANSI_FG[c - 30];
+        else if(c >= 40 && c <= 47) state['background-color'] = ANSI_BG[c - 40];
+        else if(c >= 90 && c <= 97) state['color'] = ANSI_FG_BRIGHT[c - 90];
+        else if(c >= 100 && c <= 107) state['background-color'] = ANSI_BG_BRIGHT[c - 100];
+        else if(c === 38 || c === 48){
+          // Extended color: 38;5;N (3 codes) or 38;2;R;G;B (5 codes).
+          const target = c === 38 ? 'color' : 'background-color';
+          if(codes[j + 1] === 5 && j + 2 < codes.length){
+            state[target] = ansi256ToCss(codes[j + 2]);
+            j += 3; continue;
+          }
+          if(codes[j + 1] === 2 && j + 4 < codes.length){
+            state[target] = 'rgb('+codes[j + 2]+','+codes[j + 3]+','+codes[j + 4]+')';
+            j += 5; continue;
+          }
+          j++;
+          continue;
+        }
+        // Unknown codes are silently skipped.
+        j++;
+      }
+      i = end + 1;
+    } else {
+      buf += s[i];
+      i++;
+    }
+  }
+  flush();
+  // Real newlines become <br>; the parent <pre> has white-space:pre-wrap so
+  // any remaining whitespace (e.g. double-space indent) is preserved.
+  return out.join('').replace(/\n/g, '<br>');
+}
 connect(); render(); setInterval(()=>send({type:'ping'}), 25000);

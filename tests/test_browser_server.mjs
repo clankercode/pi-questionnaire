@@ -539,9 +539,192 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(bundle, /function renderPreview/);
 		assert.match(bundle, /function renderMarkdown/);
 		assert.match(bundle, /document\.activeElement\?\.dataset\?\.previewKey/);
+		assert.match(bundle, /function ansiToHtml/);
 	} finally {
 		await handle.stop();
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Browser ANSI rendering
+//
+// The browser preview renders real ESC bytes and literal \x1b escape text
+// as colored HTML spans (mirrors the in-terminal TUI's interpretAnsiEscapes
+// + SGR parser). These tests load the actual bundle into a fake DOM and
+// exercise renderPreviewUnsafe directly so the output spans are checked
+// against the same fake-BrowserDom used by other browser tests.
+// ---------------------------------------------------------------------------
+
+test("browser ansiToHtml: real ESC bytes render as colored spans", async () => {
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket { static OPEN = 1; constructor() { this.readyState = FakeWebSocket.OPEN; } send() {} }
+		const context = vm.createContext({
+			document, WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {}, setTimeout() {}, clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		const ansiToHtml = context.ansiToHtml;
+		assert.equal(typeof ansiToHtml, "function", "bundle should expose ansiToHtml");
+		assert.equal(ansiToHtml("plain text"), "plain text", "plain text unchanged");
+		assert.equal(
+			ansiToHtml("\x1b[31mRED\x1b[0m"),
+			'<span style="color: #cd3131">RED</span>',
+			"real ESC[31m should produce red fg span",
+		);
+		assert.equal(
+			ansiToHtml("\x1b[1;31mBOLD\x1b[0m"),
+			'<span style="font-weight: bold; color: #cd3131">BOLD</span>',
+			"bold + red should produce both styles",
+		);
+		assert.equal(
+			ansiToHtml("\x1b[0mreset"),
+			"reset",
+			"reset code before text should leave text unstyled",
+		);
+	} finally { await handle.stop(); }
+});
+
+test("browser ansiToHtml: literal \\x1b / \\u001b / \\e forms decode to ANSI", async () => {
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket { static OPEN = 1; constructor() { this.readyState = FakeWebSocket.OPEN; } send() {} }
+		const context = vm.createContext({
+			document, WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {}, setTimeout() {}, clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		const ansiToHtml = context.ansiToHtml;
+		assert.equal(
+			ansiToHtml("\\x1b[32mGREEN\\x1b[0m"),
+			'<span style="color: #0dbc79">GREEN</span>',
+			"literal \\x1b should decode to real ESC[32m",
+		);
+		assert.equal(
+			ansiToHtml("\\u001b[34mBLUE\\u001b[0m"),
+			'<span style="color: #2472c8">BLUE</span>',
+			"literal \\u001b should decode to real ESC[34m",
+		);
+		assert.equal(
+			ansiToHtml("\\e[33mYELLOW\\e[0m"),
+			'<span style="color: #e5e510">YELLOW</span>',
+			"literal \\e should decode to real ESC[33m",
+		);
+		// Negative lookahead: \e followed by an identifier char must NOT decode.
+		assert.equal(
+			ansiToHtml("use \\edit to flip"),
+			"use \\edit to flip",
+			"\\e followed by identifier chars must not decode",
+		);
+	} finally { await handle.stop(); }
+});
+
+test("browser ansiToHtml: HTML in content is escaped (XSS-safe)", async () => {
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket { static OPEN = 1; constructor() { this.readyState = FakeWebSocket.OPEN; } send() {} }
+		const context = vm.createContext({
+			document, WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {}, setTimeout() {}, clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		const ansiToHtml = context.ansiToHtml;
+		const out = ansiToHtml("\x1b[31m<script>alert(1)</script>\x1b[0m");
+		assert.doesNotMatch(out, /<script>/, "raw <script> must not appear in output");
+		assert.match(out, /&lt;script&gt;/, "angle brackets should be HTML-escaped");
+	} finally { await handle.stop(); }
+});
+
+test("browser renderPreviewUnsafe: text type renders ANSI via innerHTML", async () => {
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket { static OPEN = 1; constructor() { this.readyState = FakeWebSocket.OPEN; } send() {} }
+		const context = vm.createContext({
+			document, WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {}, setTimeout() {}, clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		const renderPreviewUnsafe = context.renderPreviewUnsafe;
+		assert.equal(typeof renderPreviewUnsafe, "function");
+
+		const parent = document.createElement("div");
+
+		// Real bytes
+		renderPreviewUnsafe(parent, { type: "text", content: "\x1b[31mRED\x1b[0m text" });
+		const pre1 = parent.children[0].children[0];
+		assert.match(pre1.innerHTML, /color: #cd3131/, "real ESC should produce colored span in <pre>");
+
+		// Literal escapes
+		renderPreviewUnsafe(parent, { type: "text", content: "\\x1b[32mGREEN\\x1b[0m" });
+		const pre2 = parent.children[1].children[0];
+		assert.match(pre2.innerHTML, /color: #0dbc79/, "literal \\x1b should produce colored span");
+
+		// Plain text
+		renderPreviewUnsafe(parent, { type: "text", content: "no colors here" });
+		const pre3 = parent.children[2].children[0];
+		assert.equal(pre3.innerHTML, "no colors here", "plain text passes through unchanged");
+
+		// No [text]\n prefix anymore — the original literal-noise marker is gone.
+		assert.doesNotMatch(pre3.innerHTML, /\[text\]/, "[text] prefix should be removed");
+		assert.doesNotMatch(pre3.innerHTML, /\\n/, "literal \\n prefix should be removed");
+
+		// HTML safety
+		renderPreviewUnsafe(parent, { type: "text", content: "<img src=x onerror=alert(1)>" });
+		const pre4 = parent.children[3].children[0];
+		assert.doesNotMatch(pre4.innerHTML, /<img/, "raw <img> must not appear in output");
+		assert.match(pre4.innerHTML, /&lt;img/, "angle brackets must be escaped");
+	} finally { await handle.stop(); }
+});
+
+test("browser renderPreviewUnsafe: code type uses innerHTML for ANSI", async () => {
+	const handle = await startBrowserSyncServer({ submitDebounceMs: 0, questions: QUESTIONS, preferredPort: 0 });
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		class FakeWebSocket { static OPEN = 1; constructor() { this.readyState = FakeWebSocket.OPEN; } send() {} }
+		const context = vm.createContext({
+			document, WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {}, setTimeout() {}, clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+
+		const renderPreviewUnsafe = context.renderPreviewUnsafe;
+		const parent = document.createElement("div");
+
+		// Real bytes for code type
+		renderPreviewUnsafe(parent, { type: "code", content: "\x1b[1;33mWARN\x1b[0m" });
+		// <pre><code>innerHTML</code></pre>
+		const codeEl = parent.children[0].children[0].children[0];
+		assert.match(codeEl.innerHTML, /font-weight: bold/, "bold should be applied");
+		assert.match(codeEl.innerHTML, /color: #e5e510/, "yellow should be applied");
+
+		// Literal escapes for code type
+		renderPreviewUnsafe(parent, { type: "code", content: "\\e[4mUNDER\\e[0m" });
+		const codeEl2 = parent.children[1].children[0].children[0];
+		assert.match(codeEl2.innerHTML, /text-decoration: underline/, "underline should be applied");
+
+		// Plain text for code type
+		renderPreviewUnsafe(parent, { type: "code", content: "plain code" });
+		const codeEl3 = parent.children[2].children[0].children[0];
+		assert.equal(codeEl3.innerHTML, "plain code");
+	} finally { await handle.stop(); }
 });
 
 test("browser page protects focused answer and notes from stale websocket echoes", async () => {
