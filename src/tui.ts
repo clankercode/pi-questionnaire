@@ -23,7 +23,7 @@ import type {
 	RenderOption,
 } from "./types.ts";
 import { coerceNumber, getRenderOptions } from "./answers.ts";
-import { hyperlink, setTitle, BEL } from "./ansi.ts";
+import { hyperlink, setTitle, BEL, interpretAnsiEscapes } from "./ansi.ts";
 import { getSettings } from "./settings.ts";
 
 // ---- Public types ---------------------------------------------------------
@@ -136,7 +136,8 @@ function renderOptionLine(
 		if (previewExpanded) {
 			lines.push(theme.fg("muted", `     ┌─ ${opt.preview.type} ─`));
 			const w = Math.max(1, width);
-			const indented = wrapTextWithAnsi(opt.preview.content, w - 9).map(
+			const decoded = interpretAnsiEscapes(opt.preview.content);
+			const indented = wrapTextWithAnsi(decoded, w - 9).map(
 				(l) => "     │ " + l,
 			);
 			lines.push(...indented);

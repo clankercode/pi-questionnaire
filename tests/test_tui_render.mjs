@@ -1431,6 +1431,158 @@ test("preview expansion persists per question; toggles with `e`", () => {
 	assert.doesNotMatch(joined, /A-->B/);
 });
 
+// ---------------------------------------------------------------------------
+// ANSI bytes in preview content
+//
+// The expanded preview wraps preview.content via wrapTextWithAnsi, which
+// preserves real ESC bytes. Real ESC in content must reach the rendered
+// output unchanged so a terminal interprets it as SGR. These tests guard
+// against any future refactor that would escape or strip those bytes.
+// ---------------------------------------------------------------------------
+
+test("expanded preview: real ESC bytes in content are preserved", () => {
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "\x1b[31mRED\x1b[0m" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const previewLine = lines.find((line) => line.includes("RED"));
+	assert.ok(previewLine, "expanded preview should render the content");
+	assert.ok(previewLine.includes("\x1b[31m"), "real ESC[31m should pass through");
+	assert.ok(previewLine.includes("\x1b[0m"), "real ESC reset should pass through");
+	assert.ok(!previewLine.includes("\\x1b[31m"), "literal escape text must not be reintroduced");
+});
+
+test("expanded preview: literal \\x1b in content is rendered as ANSI", () => {
+	// Common authoring mistake: someone writes a literal `\x1b[31m` (5 chars)
+	// in content instead of the real 0x1b byte. The TUI now interprets
+	// that text as an actual SGR sequence so the colored output renders,
+	// matching the rendered-vs-escaped guarantee for in-terminal previews.
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "\\x1b[31mRED\\x1b[0m" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const previewLine = lines.find((line) => line.includes("RED"));
+	assert.ok(previewLine, "expanded preview should render the content");
+	assert.ok(previewLine.includes("\x1b[31m"), "literal \\x1b should decode to real ESC[31m");
+	assert.ok(previewLine.includes("\x1b[0m"), "literal \\x1b should decode to real ESC reset");
+	assert.ok(!previewLine.includes("\\x1b"), "literal escape should not survive in output");
+});
+
+test("expanded preview: literal \\u001b in content is rendered as ANSI", () => {
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "\\u001b[32mGREEN\\u001b[0m" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const previewLine = lines.find((line) => line.includes("GREEN"));
+	assert.ok(previewLine, "expanded preview should render the content");
+	assert.ok(previewLine.includes("\x1b[32m"), "literal \\u001b should decode to real ESC[32m");
+	assert.ok(!previewLine.includes("\\u001b"), "literal escape should not survive in output");
+});
+
+test("expanded preview: literal \\e in content is rendered as ANSI", () => {
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "\\e[33mYELLOW\\e[0m" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const previewLine = lines.find((line) => line.includes("YELLOW"));
+	assert.ok(previewLine, "expanded preview should render the content");
+	assert.ok(previewLine.includes("\x1b[33m"), "literal \\e should decode to real ESC[33m");
+});
+
+test("expanded preview: \\e prefix is not interpreted when followed by an identifier char", () => {
+	// \\edit is a common word in instruction-like content. We must not
+	// mangle it to [ESC]dit. The preview path leaves the text untouched.
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "use \\edit to flip; \\echo afterwards" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const joined = lines.join("\n");
+	assert.ok(joined.includes("\\edit"), "\\edit should pass through unchanged");
+	assert.ok(joined.includes("\\echo"), "\\echo should pass through unchanged");
+	assert.ok(!joined.includes("\x1bdit"), "\\e should not be decoded when followed by an identifier char");
+});
+
+test("expanded preview: ANSI state carries across wrap boundaries", () => {
+	// Real ESC bytes in long content must wrap onto multiple lines with
+	// the SGR state correctly carried to the next wrapped line (so the
+	// second line still renders in the active color until reset).
+	const padded = "x".repeat(80);
+	const content = `first${padded}\x1b[31mRED CONTINUES HERE\x1b[0mEND`;
+	const { component } = render([{
+		header: "L",
+		question: "L",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const linesWithRed = lines.filter((line) => line.includes("RED"));
+	assert.ok(linesWithRed.length >= 1, "should have at least one preview line containing RED");
+	for (const line of linesWithRed) {
+		assert.ok(line.includes("\x1b[31m"), "wrapped preview line should still carry the active ESC[31m state");
+	}
+});
+
+test("expanded preview: literal forms are decoded alongside real bytes from other sources", () => {
+	// Mixed content: real ESC bytes for some styling, literal \\x1b for
+	// other styling. Should not double-decode: the real bytes are left
+	// alone, the literals become real bytes, output is consistent.
+	const { component } = render([{
+		header: "Pick",
+		question: "Pick",
+		type: "select_one",
+		options: [
+			{ label: "A", preview: { type: "code", content: "real=\x1b[31mR\x1b[0m literal=\\x1b[32mG\\x1b[0m" } },
+			{ label: "B" },
+		],
+	}]);
+	component.handleInput("e");
+	const lines = component.render(80);
+	const previewLine = lines.find((line) => line.includes("real=") && line.includes("literal="));
+	assert.ok(previewLine, "expanded preview should render mixed content");
+	assert.ok(previewLine.includes("\x1b[31mR"), "real ESC[31m preserved");
+	assert.ok(previewLine.includes("\x1b[32mG"), "literal \\x1b should decode to real ESC[32m even when real bytes exist elsewhere");
+	assert.ok(!previewLine.includes("\\x1b[32m"), "no literal escape should survive");
+});
+
 test("tab bar shows ■ for answered, ▣ for answered+note, □ for unanswered", () => {
 	const { lines, component } = render([
 		{ header: "a", question: "A?", type: "free_text" },
