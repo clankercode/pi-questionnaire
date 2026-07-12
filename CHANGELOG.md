@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
+## [2.1.5] - 2026-07-13
+
+### Fixed
+
+- **ANSI escape forms in expanded option preview (TUI)** — `preview.content` now renders real ESC bytes *and* literal `\x1b` / `\u001b` / `\e` escape text as actual terminal coloring instead of literal escape characters. Real bytes were already preserved by `wrapTextWithAnsi`; the new `interpretAnsiEscapes` helper in `src/ansi.ts` decodes the literal forms before the wrap pass. Wired into `renderOptionLine`'s expanded-preview path. Description, notes, and other text fields are intentionally left alone — those paths don't usually carry ANSI and a literal escape form there is more likely intentional display than an authoring oversight (`8dc4313`).
+- **ANSI escape forms in browser preview (`text` / `code`)** — the browser path was a separate bug: `code.textContent = preview.content` dumped both real ESC bytes and literal `\x1b` text as raw characters, so colors never showed in the browser view. Added an `ansiToHtml()` helper in `src/browser-assets/browser-client.js` that decodes the same literal escape forms (mirroring the TUI regex), parses SGR codes (reset / bold / dim / italic / underline / 8-color fg+bg / bright fg+bg / 256-color / 24-bit / default-fg-bg), and emits colored `<span>` elements via `innerHTML`. Every text run is HTML-escaped via the existing `escapeHtml()` for XSS safety. Real `\n` becomes `<br>` for proper line breaks (`a6c30c3`).
+
 ## [2.1.4] - 2026-07-07
 
 ### Added
