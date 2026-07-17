@@ -186,6 +186,7 @@ async function main() {
 				const intervalLog: Array<{ ms: number; cb: () => void }> = [];
 				const timeoutLog: Array<{ ms: number; cb: () => void }> = [];
 				const sendLog: Array<{ message: unknown; options: unknown }> = [];
+				const eventLog: Array<{ name: string; data: unknown }> = [];
 				const logBuf: string[] = [];
 
 				const useMockSpawn = cmd.mockSpawn !== false; // default true
@@ -235,7 +236,21 @@ async function main() {
 					sendLog.push({ message: msg, options });
 				}) as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI["sendMessage"];
 
-				const mockPi = { sendMessage: mockSendMessage };
+				const mockEvents = {
+					emit(name: string, data: unknown) {
+						eventLog.push({ name, data });
+						if (cmd.mockEventThrows === true) {
+							throw new Error("mock event failure");
+						}
+					},
+				};
+				const mockPi = {
+					sendMessage: mockSendMessage,
+					events: mockEvents,
+				} as unknown as Pick<
+					import("@earendil-works/pi-coding-agent").ExtensionAPI,
+					"sendMessage" | "events"
+				>;
 
 				const tmpDir = (cmd.tmpDir as string | undefined) ?? "/tmp/auq-test";
 
@@ -251,11 +266,6 @@ async function main() {
 					tmpDir,
 					getSettingsOverride: settingsOverride,
 					log: (line) => logBuf.push(line),
-					// Default to empty ("not in herdr") so tests are hermetic and
-					// don't accidentally inherit the host's HERDR_ENV. Tests opt
-					// into a herdr pane by passing herdrEnv/herdrPaneId on the cmd.
-					herdrEnv: (cmd.herdrEnv as string | undefined) ?? "",
-					herdrPaneId: (cmd.herdrPaneId as string | undefined) ?? "",
 				});
 
 				// If cmd.tickHeartbeat is true, run one heartbeat tick to
@@ -294,6 +304,11 @@ async function main() {
 					handle.clear();
 					cleared = true;
 				}
+				if (cmd.doClearTwice === true) {
+					handle.clear();
+					handle.clear();
+					cleared = true;
+				}
 
 				result = {
 					effects: handle.effects,
@@ -304,6 +319,7 @@ async function main() {
 						setInterval: intervalLog.map((e) => ({ ms: e.ms })),
 						setTimeout: timeoutLog.map((e) => ({ ms: e.ms })),
 						sendMessage: sendLog,
+						events: eventLog,
 						log: logBuf,
 						writes,
 					},

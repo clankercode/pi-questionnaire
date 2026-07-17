@@ -28,6 +28,8 @@ function registerExtension() {
 		registerCommand(name, command) {
 			commands.push({ name, command });
 		},
+		on() {},
+		events: { emit() {} },
 		sendMessage: async () => {},
 	});
 	return { tools, commands };
@@ -37,11 +39,18 @@ test("AskUserQuestion clears side effects when ctx.ui.custom throws", async () =
 	const clears = [];
 	const intervals = [];
 	const timeouts = [];
+	const events = [];
 	const pi = {
 		registerTool(tool) {
-			this.tool = tool;
+			if (tool.name === "AskUserQuestion") this.tool = tool;
 		},
 		registerCommand() {},
+		on() {},
+		events: {
+			emit(name, data) {
+				events.push({ name, data });
+			},
+		},
 		sendMessage: async () => {},
 	};
 	extension(pi);
@@ -110,14 +119,25 @@ test("AskUserQuestion clears side effects when ctx.ui.custom throws", async () =
 	assert.equal(clears.length, 1, "pending side effects should be cleared in finally");
 	assert.equal(clears[0].kind, "timeout");
 	assert.equal(timeouts[0].cleared, true);
+	assert.deepEqual(events, [
+		{ name: "herdr:blocked", data: { active: true, label: "AskUserQuestion: Danger" } },
+		{ name: "herdr:blocked", data: { active: false } },
+	]);
 });
 
 test("AskUserQuestion starts browser server, injects URL, and stops server after submit", async () => {
+	const events = [];
 	const pi = {
 		registerTool(tool) {
-			this.tool = tool;
+			if (tool.name === "AskUserQuestion") this.tool = tool;
 		},
 		registerCommand() {},
+		on() {},
+		events: {
+			emit(name, data) {
+				events.push({ name, data });
+			},
+		},
 		sendMessage: async () => {},
 	};
 	extension(pi);
@@ -154,7 +174,8 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 						component.handleInput("k");
 						component.applyBrowserOptions({ notes: { note: "browser note" } });
 						component.handleInput("\r"); // commit free_text, advance to submit
-						component.handleInput("\r"); // submit
+						await new Promise((resolve) => setTimeout(resolve, 260));
+						component.handleInput("\r"); // submit after the production debounce
 						return doneValue;
 					},
 				},
@@ -167,14 +188,46 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 		assert.match(result.details.url, /http:\/\/127\.0\.0\.1:\d+\/q\//);
 		assert.equal(typeof result.details.port, "number");
 		await assert.rejects(fetch(`http://127.0.0.1:${result.details.port}/healthz`));
+		assert.deepEqual(events, [
+			{ name: "herdr:blocked", data: { active: true, label: "AskUserQuestion: Pick" } },
+			{ name: "herdr:blocked", data: { active: false } },
+		]);
 	} finally {
 		clearInMemorySettings();
 	}
 });
 
-test("AskUserQuestion tool and settings command register", () => {
+test("AskUserQuestion non-TUI rejection emits no Herdr lifecycle event", async () => {
+	const events = [];
+	const pi = {
+		registerTool(tool) {
+			if (tool.name === "AskUserQuestion") this.tool = tool;
+		},
+		registerCommand() {},
+		on() {},
+		events: {
+			emit(name, data) {
+				events.push({ name, data });
+			},
+		},
+		sendMessage: async () => {},
+	};
+	extension(pi);
+
+	const result = await pi.tool.execute(
+		"call-print",
+		{ questions: [{ header: "Headless", question: "Proceed?", type: "confirm_enum" }] },
+		new AbortController().signal,
+		() => {},
+		{ mode: "print", ui: {} },
+	);
+
+	assert.equal(result.details.lifecycle, "cancelled");
+	assert.deepEqual(events, []);
+});
+
+test("AskUserQuestion tools and settings command register", () => {
 	const { tools, commands } = registerExtension();
-	assert.equal(tools.length, 1);
-	assert.equal(tools[0].name, "AskUserQuestion");
+	assert.deepEqual(tools.map((tool) => tool.name), ["AskUserQuestion", "ask_user"]);
 	assert.ok(commands.some((x) => x.name === "settings-ask-user-question"));
 });

@@ -48,7 +48,7 @@
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-browser-assets.mjs",
-    "test": "node --test tests/test_tui_render.mjs tests/test_browser_server.mjs",
+    "test": "node --test tests/test_tui_render.mjs tests/test_browser_server.mjs tests/test_index_execute.mjs",
     "test:all": "npm test && python3 -m pytest tests/ -q",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build && npm run test:all"
