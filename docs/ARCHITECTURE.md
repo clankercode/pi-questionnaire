@@ -201,10 +201,10 @@ The `setBrowserUrl()` and `getBrowserOpenAttempt()` hooks are exposed for slice 
 | `onQuestionCommand`                       | Write payload JSON to `os.tmpdir()/ask-user-question-<id>.json`, spawn the command with `PI_QUESTIONNAIRE_PAYLOAD_FILE` env var |
 | `heartbeatWhileActive` + interval         | `setInterval` calling `pi.sendMessage` with `customType:"ask-user-question-heartbeat"`, `deliverAs:"followUp"` |
 | `dangerCheckEnabled`                      | Log "danger check: enabled/disabled" — TUI reads the setting itself                       |
-| `herdrReportBlocked`                      | Inside a herdr pane (`HERDR_ENV=1` + `HERDR_PANE_ID`), spawn `herdr pane report-agent --state blocked` on mount and `herdr pane release-agent` on `clear()`; no-op outside herdr |
+| `herdrReportBlocked`                      | Emit `herdr:blocked` with `active:true` on mount and `active:false` from idempotent `clear()`; the managed Herdr Pi integration reference-counts scopes and owns authoritative pane/session reporting |
 | `debounceMs`                              | Not a side effect; the caller (`index.ts`) puts it on the `ToolResultDetails`             |
 
-All spawns are wrapped in try/catch — **side effects must NEVER break the tool**. The TUI shows even if every side effect fails.
+All spawns and shared-event emissions are wrapped in try/catch — **side effects must NEVER break the tool**. The TUI shows even if every side effect fails.
 
 All timers are `.unref()`-ed (where supported) so they never keep Node alive after the questionnaire settles.
 
@@ -215,7 +215,7 @@ Returned handle:
   effects: string[],          // names of fired effects, in execution order
   payloadFile: string | null, // on-disk path of onQuestionCommand payload
   heartbeatStarted: boolean,  // true if heartbeat interval was started
-  clear(): void,              // release heartbeat + delayed notification timer; safe to call multiple times
+  clear(): void,              // release Herdr scope + timers; safe to call multiple times
 }
 ```
 

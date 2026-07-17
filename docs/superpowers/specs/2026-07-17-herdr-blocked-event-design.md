@@ -1,6 +1,6 @@
 # Herdr Blocked-State Event Integration Design
 
-**Date:** 2026-07-17  
+**Date:** 2026-07-17
 **Backlog:** B002 — herdr support: show as blocked when question is asked
 
 ## Goal

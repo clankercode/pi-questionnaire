@@ -197,6 +197,112 @@ test("AskUserQuestion starts browser server, injects URL, and stops server after
 	}
 });
 
+test("ask_user single-question mode emits and clears Herdr blocked state", async () => {
+	const events = [];
+	const pi = {
+		registerTool(tool) {
+			if (tool.name === "ask_user") this.tool = tool;
+		},
+		registerCommand() {},
+		on() {},
+		events: {
+			emit(name, data) {
+				events.push({ name, data });
+			},
+		},
+		sendMessage: async () => {},
+	};
+	extension(pi);
+	setInMemorySettings({ browserEnabled: false, bellOnQuestion: false });
+	try {
+		const result = await pi.tool.execute(
+			"call-ask-user-single",
+			{ method: "confirm", title: "Proceed" },
+			new AbortController().signal,
+			() => {},
+			{
+				mode: "tui",
+				ui: {
+					custom: async (build) => {
+						let doneValue = null;
+						const component = build(fakeTui(), fakeTheme, {}, (value) => {
+							doneValue = value;
+						});
+						component.handleInput("\r");
+						await new Promise((resolve) => setTimeout(resolve, 260));
+						component.handleInput("\r");
+						return doneValue;
+					},
+				},
+			},
+		);
+
+		assert.equal(result.details.lifecycle, "answered");
+		assert.deepEqual(events, [
+			{ name: "herdr:blocked", data: { active: true, label: "AskUserQuestion: Proceed" } },
+			{ name: "herdr:blocked", data: { active: false } },
+		]);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
+test("ask_user batch mode emits and clears one Herdr blocked scope", async () => {
+	const events = [];
+	const pi = {
+		registerTool(tool) {
+			if (tool.name === "ask_user") this.tool = tool;
+		},
+		registerCommand() {},
+		on() {},
+		events: {
+			emit(name, data) {
+				events.push({ name, data });
+			},
+		},
+		sendMessage: async () => {},
+	};
+	extension(pi);
+	setInMemorySettings({ browserEnabled: false, bellOnQuestion: false });
+	try {
+		const result = await pi.tool.execute(
+			"call-ask-user-batch",
+			{
+				questions: [
+					{ method: "confirm", title: "First" },
+					{ method: "confirm", title: "Second" },
+				],
+			},
+			new AbortController().signal,
+			() => {},
+			{
+				mode: "tui",
+				ui: {
+					custom: async (build) => {
+						let doneValue = null;
+						const component = build(fakeTui(), fakeTheme, {}, (value) => {
+							doneValue = value;
+						});
+						component.handleInput("\r");
+						component.handleInput("\r");
+						await new Promise((resolve) => setTimeout(resolve, 260));
+						component.handleInput("\r");
+						return doneValue;
+					},
+				},
+			},
+		);
+
+		assert.equal(result.details.lifecycle, "answered");
+		assert.deepEqual(events, [
+			{ name: "herdr:blocked", data: { active: true, label: "AskUserQuestion: First" } },
+			{ name: "herdr:blocked", data: { active: false } },
+		]);
+	} finally {
+		clearInMemorySettings();
+	}
+});
+
 test("AskUserQuestion non-TUI rejection emits no Herdr lifecycle event", async () => {
 	const events = [];
 	const pi = {

@@ -325,7 +325,11 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			const questions = normalizeQuestions(adapted.questions as any);
-			return executeQuestionnaire(questions, params as any, ctx);
+			return executeQuestionnaire(
+				questions,
+				{ questions: adapted.questions } as AskUserQuestionInput,
+				ctx,
+			);
 		},
 
 		renderCall(args, theme) {

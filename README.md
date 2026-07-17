@@ -123,7 +123,7 @@ Configured via `<agentDir>/ask-user-question.json` (global) and/or `<cwd>/.pi/as
 |              | `heartbeatIntervalMinutes`  | `4.5`   | Idle interval in minutes (0.5–60)                    |
 | **Input**    | `debounceMs`                | `300`   | Debounce (ms) when typing into number/free_text      |
 | **Safety**   | `dangerCheckEnabled`        | `true`  | Enforce the `is_dangerous` typed-confirmation flow   |
-| **Integrations** | `herdrReportBlocked`    | `true`  | Mark the herdr pane `blocked` while a question is on screen (no-op outside herdr) |
+| **Integrations** | `herdrReportBlocked`    | `true`  | Mark Pi `blocked` through the managed Herdr integration while a question is on screen |
 
 Full reference (types, ranges, behavior): [docs/USAGE.md#settings-reference](docs/USAGE.md#settings-reference).
 
@@ -133,23 +133,24 @@ The settings menu is available via the menu command in pi (slash name will land 
 
 [Herdr](https://herdr.dev) is a terminal agent multiplexer that shows each pane's semantic state — `working`, `blocked`, `done`, `idle` — in a sidebar so you can see which agent needs attention. While an `AskUserQuestion`/`ask_user` TUI is on screen the agent is **blocked waiting on a human**, so pi-questionnaire tells herdr exactly that.
 
-When `herdrReportBlocked` is on (the default) and the process is inside a herdr-managed pane (`HERDR_ENV=1` + `HERDR_PANE_ID`), the extension runs, on mount:
+When `herdrReportBlocked` is on (the default), the extension joins Herdr's managed Pi lifecycle through Pi's shared event bus. On mount it emits:
 
-```bash
-herdr pane report-agent "$HERDR_PANE_ID" \
-  --source user:pi-questionnaire --agent pi --state blocked \
-  --custom-status "answering question" --message "AskUserQuestion: <header>"
+```typescript
+pi.events.emit("herdr:blocked", {
+  active: true,
+  label: "AskUserQuestion: <header>",
+});
 ```
 
-and, when the questionnaire is answered / cancelled / thrown:
+When the questionnaire is answered, cancelled, or throws, its idempotent cleanup emits:
 
-```bash
-herdr pane release-agent "$HERDR_PANE_ID" --source user:pi-questionnaire --agent pi
+```typescript
+pi.events.emit("herdr:blocked", { active: false });
 ```
 
-The release restores the pane's prior status authority. Reports are fire-and-forget and never break the tool; outside herdr the whole feature is a no-op. This works whether or not you have the official `herdr integration install pi` lifecycle extension installed — pi-questionnaire's report is the most authoritative source for "a question is on screen right now."
+Install the official lifecycle integration with `herdr integration install pi`. It owns authoritative pane/session reporting and reference-counts overlapping blocked scopes, so clearing one questionnaire cannot prematurely clear another. Event delivery is best-effort and never breaks the tool; without the managed integration listener, the feature is a no-op.
 
-Verify from another pane with `herdr agent list` (look for `agent_status: "blocked"` + `custom_status: "answering question"`) or `herdr wait agent-status <pane> --status blocked`.
+Verify from another pane with `herdr agent list` (look for `agent_status: "blocked"`) or `herdr wait agent-status <pane> --status blocked`.
 
 ## Keymap
 

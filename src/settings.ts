@@ -50,8 +50,8 @@ export interface AskUserQuestionSettings {
 	debounceMs?: number;
 	/** Show a confirmation prompt before destructive commands are executed. */
 	dangerCheckEnabled?: boolean;
-	/** Report `blocked` to herdr (agent multiplexer) while a questionnaire is
-	 * on screen. No-ops outside a herdr-managed pane. */
+	/** Report `blocked` through Herdr's managed Pi integration while a
+	 * questionnaire is on screen. No-ops when that integration is absent. */
 	herdrReportBlocked?: boolean;
 }
 
