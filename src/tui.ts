@@ -954,8 +954,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs,
 					// Left/Right stay in the Other editor (cursor movement),
 					// not tab navigation. Tab is the canonical notes toggle.
+					const isZeroSubmitHotkey = data === "0" && isMulti && editor.getText() === "";
 					const isNavKey = matchesKey(data, Key.up) || matchesKey(data, Key.down)
-						|| data === "0"
+						|| isZeroSubmitHotkey
 						|| matchesKey(data, Key.tab);
 					if (!isNavKey) {
 						editor.handleInput(data);

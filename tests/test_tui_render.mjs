@@ -460,6 +460,46 @@ test("select_one Other: bracket characters are typed into the editor", () => {
 	assert.equal(component.getEditorText(), "[]");
 });
 
+test("select_one Other: zero appends to a non-empty draft instead of opening Submit", () => {
+	const { component } = drive([
+		{ id: "choice", header: "Choice", question: "Pick?", type: "select_one", options: [{ label: "A" }, { label: "B" }] },
+		{ id: "followup", header: "Follow-up", question: "Continue?", type: "confirm_enum" },
+	]);
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	for (const ch of "custom") component.handleInput(ch);
+	component.handleInput("0");
+
+	assert.equal(component.getEditorText(), "custom0");
+	const joined = component.render(80).join("\n");
+	assert.match(joined, /Pick\?/);
+	assert.doesNotMatch(joined, /Submit answers/);
+});
+
+test("select_one Other: zero on an empty draft retains the multi-question Submit hotkey", () => {
+	const { component } = drive([
+		{ id: "choice", header: "Choice", question: "Pick?", type: "select_one", options: [{ label: "A" }, { label: "B" }] },
+		{ id: "followup", header: "Follow-up", question: "Continue?", type: "confirm_enum" },
+	]);
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	component.handleInput("0");
+
+	assert.match(component.render(80).join("\n"), /Submit answers/);
+});
+
+test("select_one Other: zero is literal in a single-question form", () => {
+	const { component } = drive([
+		{ id: "choice", header: "Choice", question: "Pick?", type: "select_one", options: [{ label: "A" }, { label: "B" }] },
+	]);
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	component.handleInput("0");
+
+	assert.equal(component.getEditorText(), "0");
+	assert.match(component.render(80).join("\n"), /Pick\?/);
+});
+
 test("select_one Other: typing goes to the editor and Enter commits", () => {
 	const { component, getDone } = drive([{
 		header: "x",
