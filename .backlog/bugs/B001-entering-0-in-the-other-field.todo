@@ -1,14 +1,18 @@
 ---
+claimed_at: "2026-07-17T04:51:33Z"
+claimed_by: cli-user
+completed_at: null
 complexity: medium
 created_at: "2026-07-17T04:49:57Z"
 depends_on: []
 estimate_hours: 1
 id: B001
 priority: high
-status: pending
+started_at: "2026-07-17T04:51:33Z"
+status: in_progress
 tags: []
 title: Entering 0 in the 'other' field will trigger hotkey and like reset focus
-updated_at: "2026-07-17T04:49:57Z"
+updated_at: "2026-07-17T04:51:33Z"
 ---
 
 Entering 0 in the 'other' field will trigger hotkey and like reset focus
