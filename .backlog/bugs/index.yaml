@@ -1,3 +1,4 @@
 bugs:
     - file: B001-entering-0-in-the-other-field.todo
     - file: B002-herdr-support-show-as-blocked.todo
+    - file: B003-browser-confirm-enum-maps-cust.todo

@@ -1,0 +1,13 @@
+---
+complexity: low
+created_at: "2026-07-17T04:58:47Z"
+depends_on: []
+estimate_hours: 1
+id: B003
+priority: high
+status: pending
+tags: []
+title: Browser confirm_enum maps custom labels to decline
+updated_at: "2026-07-17T04:58:47Z"
+---
+In the browser UI, confirm_enum answerValue() maps only the literal label 'Affirm' to the canonical 'affirm' value; every other non-Other option label maps to 'decline'. As a result, custom labels such as 'Approved' and 'Changes needed' both return decline, and selected-state restoration also assumes literal Affirm/Decline labels. Custom select_one radios are unaffected. Add browser regression coverage for custom confirm_enum labels and map the first/second semantic options to affirm/decline by position rather than display text.
