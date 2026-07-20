@@ -429,6 +429,37 @@ test("confirm_enum: arrow-down + Enter on Decline returns decline", () => {
 	}
 });
 
+test("confirm_enum: custom first option maps to affirm by position", () => {
+	const { component, getDone } = drive([{
+		header: "Review",
+		question: "Approve this change?",
+		type: "confirm_enum",
+		options: [{ label: "Approved" }, { label: "Changes needed" }],
+	}]);
+	component.handleInput("\r"); // first option
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		assert.deepEqual(v.answers[0].value, { mode: "option", value: "affirm" });
+	}
+});
+
+test("confirm_enum: custom second option maps to decline by position", () => {
+	const { component, getDone } = drive([{
+		header: "Review",
+		question: "Approve this change?",
+		type: "confirm_enum",
+		options: [{ label: "Approved" }, { label: "Changes needed" }],
+	}]);
+	component.handleInput("\u001b[B"); // second option
+	component.handleInput("\r");
+	const v = getDone();
+	assert.ok(v !== null);
+	if (v) {
+		assert.deepEqual(v.answers[0].value, { mode: "option", value: "decline" });
+	}
+});
+
 test("select_one Other: Ctrl+Left renders cursor on the active editor line", () => {
 	const { component } = drive([{
 		header: "x",

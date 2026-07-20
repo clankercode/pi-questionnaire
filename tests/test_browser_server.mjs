@@ -347,6 +347,107 @@ test("confirm_enum sentinel Other value is not accepted as typed Other text", ()
 	assert.equal(coerceAnswer({ mode: "other", text: "__other__" }, question), undefined);
 });
 
+test("browser confirm_enum maps custom labels by position and restores selection", async () => {
+	const customQuestions = normalizeQuestions([
+		{
+			id: "review",
+			header: "Review",
+			question: "Approve this change?",
+			type: "confirm_enum",
+			options: [{ label: "Approved" }, { label: "Changes needed" }],
+		},
+	]);
+	const handle = await startBrowserSyncServer({
+		submitDebounceMs: 0,
+		questions: customQuestions,
+		preferredPort: 0,
+	});
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {},
+			setTimeout(fn) { fn(); return 1; },
+			clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+		sockets[0].onmessage({
+			data: JSON.stringify({
+				type: "state",
+				questions: customQuestions,
+				currentTab: 0,
+				answers: {},
+				options: { notes: {} },
+				lifecycle: "open",
+			}),
+		});
+
+		const approved = document.querySelector('[data-focus-key="q-0-choice-0"]');
+		const changes = document.querySelector('[data-focus-key="q-0-choice-1"]');
+		assert.ok(approved);
+		assert.ok(changes);
+		assert.equal(approved.value, "Approved");
+		assert.equal(changes.value, "Changes needed");
+
+		approved.checked = true;
+		approved.onchange();
+		assert.deepEqual(sent.at(-1), {
+			type: "answer",
+			questionId: "review",
+			value: { mode: "option", value: "affirm" },
+		});
+
+		changes.checked = true;
+		changes.onchange();
+		assert.deepEqual(sent.at(-1), {
+			type: "answer",
+			questionId: "review",
+			value: { mode: "option", value: "decline" },
+		});
+
+		// Restore from canonical affirm/decline values, not display labels.
+		sockets[0].onmessage({
+			data: JSON.stringify({
+				type: "answers",
+				answers: { "0": { mode: "option", value: "affirm" } },
+			}),
+		});
+		const restoredApproved = document.querySelector('[data-focus-key="q-0-choice-0"]');
+		const restoredChanges = document.querySelector('[data-focus-key="q-0-choice-1"]');
+		assert.equal(restoredApproved.checked, true);
+		assert.equal(restoredChanges.checked, false);
+
+		sockets[0].onmessage({
+			data: JSON.stringify({
+				type: "answers",
+				answers: { "0": { mode: "option", value: "decline" } },
+			}),
+		});
+		const declinedApproved = document.querySelector('[data-focus-key="q-0-choice-0"]');
+		const declinedChanges = document.querySelector('[data-focus-key="q-0-choice-1"]');
+		assert.equal(declinedApproved.checked, false);
+		assert.equal(declinedChanges.checked, true);
+	} finally {
+		await handle.stop();
+	}
+});
+
 
 test("browser page treats internal Other sentinel text as unanswered", async () => {
 	const otherQuestions = normalizeQuestions([

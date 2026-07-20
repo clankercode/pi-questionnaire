@@ -201,10 +201,20 @@ function savedOptionValue(currentValue: AnswerValue | undefined): string | undef
 	return undefined;
 }
 
+/** First non-Other confirm option → affirm; second → decline (by position, not label). */
+function confirmSemanticValue(q: CanonicalQuestion, opt: RenderOption): "affirm" | "decline" | null {
+	if (q.type !== "confirm_enum" || opt.isOther) return null;
+	const nonOther = getRenderOptions(q).filter((o) => !o.isOther);
+	const idx = nonOther.findIndex((o) => o.label === opt.label);
+	if (idx === 0) return "affirm";
+	if (idx === 1) return "decline";
+	return null;
+}
+
 function optionComparableValue(q: CanonicalQuestion, opt: RenderOption): string {
 	if (q.type === "confirm_enum") {
-		if (opt.label === "Affirm") return "affirm";
-		if (opt.label === "Decline") return "decline";
+		const semantic = confirmSemanticValue(q, opt);
+		if (semantic) return semantic;
 	}
 	return opt.label;
 }
@@ -660,9 +670,11 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					}
 					return;
 				}
-				const value: ConfirmAnswer = opt.label === "Affirm"
-					? { mode: "option", value: "affirm" }
-					: { mode: "option", value: "decline" };
+				const semantic = confirmSemanticValue(q, opt);
+				const value: ConfirmAnswer = {
+					mode: "option",
+					value: semantic === "affirm" ? "affirm" : "decline",
+				};
 				saveAnswer(q, value);
 				commitAndAdvance();
 				return;

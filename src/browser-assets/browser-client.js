@@ -179,12 +179,34 @@ function optionValue(opt){ return opt.isOther ? '__other__' : opt.label; }
 function isOtherSentinelText(text){ return String(text || '').trim().toLowerCase() === '__other__'; }
 function isOtherAnswer(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'other' && !isOtherSentinelText(answer.text); }
 function choiceValue(answer){ return answer && typeof answer === 'object' && !Array.isArray(answer) && answer.mode === 'option' ? answer.value : undefined; }
+/** First non-Other confirm option → affirm; second → decline. Position, not label text. */
+function confirmOptions(q,i){
+  const opts = (state.renderOptions && state.renderOptions[String(i)]) || q.options || [];
+  return opts.filter(opt => !opt.isOther);
+}
+function confirmSemanticFromLabel(q,i,label){
+  if(q.type !== 'confirm_enum') return null;
+  const opts = confirmOptions(q,i);
+  const idx = opts.findIndex(opt => opt.label === label);
+  if(idx === 0) return 'affirm';
+  if(idx === 1) return 'decline';
+  return null;
+}
+function confirmSemanticForOpt(q,i,opt){
+  if(opt.isOther) return null;
+  return confirmSemanticFromLabel(q,i,opt.label);
+}
 function isChoiceChecked(q,i,opt){
   const answer = currentAnswer(i);
   if(q.type === 'select_many'){
     return Array.isArray(answer) && answer.some(x => opt.isOther ? isOtherAnswer(x) : choiceValue(x) === opt.label);
   }
-  return opt.isOther ? isOtherAnswer(answer) : choiceValue(answer) === (q.type === 'confirm_enum' && opt.label === 'Affirm' ? 'affirm' : q.type === 'confirm_enum' && opt.label === 'Decline' ? 'decline' : opt.label);
+  if(opt.isOther) return isOtherAnswer(answer);
+  if(q.type === 'confirm_enum'){
+    const semantic = confirmSemanticForOpt(q,i,opt);
+    return semantic != null && choiceValue(answer) === semantic;
+  }
+  return choiceValue(answer) === opt.label;
 }
 function otherAnswerText(i){
   const answer = currentAnswer(i);
@@ -215,7 +237,13 @@ function answerValue(q,i,el){
   }
   if(q.type === 'confirm_enum'){
     if(isOtherTextInput(el) || el.value === '__other__') return otherAnswerValue(q,i,el);
-    return {mode:'option', value: el.value.toLowerCase() === 'affirm' ? 'affirm' : 'decline'};
+    // Accept either radio DOM labels (Approved) or already-canonical values (affirm).
+    const raw = String(el.value || '');
+    if(raw.toLowerCase() === 'affirm' || raw.toLowerCase() === 'decline'){
+      return {mode:'option', value: raw.toLowerCase()};
+    }
+    const semantic = confirmSemanticFromLabel(q,i,raw);
+    return {mode:'option', value: semantic === 'affirm' ? 'affirm' : 'decline'};
   }
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
