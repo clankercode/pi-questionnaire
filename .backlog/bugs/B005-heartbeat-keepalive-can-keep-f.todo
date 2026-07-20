@@ -1,0 +1,59 @@
+---
+complexity: medium
+created_at: "2026-07-20T16:28:10Z"
+depends_on: []
+estimate_hours: 2
+id: B005
+priority: high
+status: pending
+tags:
+    - heartbeat
+    - side-effects
+    - session
+title: Heartbeat keepalive can keep firing after questionnaire ends
+updated_at: "2026-07-20T16:28:10Z"
+---
+## Summary
+
+`heartbeatWhileActive` injects follow-up messages with content
+`AskUserQuestion is still waiting for an answer.` on an interval while a
+questionnaire is open. In practice those messages continued after the
+questionnaire was cancelled/abandoned or after session reload, spamming
+the agent and looking like a live stuck tool call.
+
+## Observed
+
+- Project settings had `heartbeatWhileActive: true` (interval 4.5m).
+- After smoke-testing AskUserQuestion / ask_user (including cancels and
+  reloads), the session kept receiving the heartbeat string repeatedly.
+- Turning the setting off on disk did **not** stop an already-running
+  interval in the live session (expected for in-flight timers), but the
+  feature also appears able to outlive a clean questionnaire lifecycle
+  from the user's perspective.
+- Users cannot cancel the ghost message from chat; only Esc on a live
+  TUI or full session restart clears it.
+
+## Suspected causes (investigate)
+
+1. `sideEffects.clear()` not always reached (TUI hang, partial reload,
+   exception paths outside the `finally` in `executeQuestionnaire`).
+2. `sendMessage(..., { triggerTurn: true, deliverAs: "followUp" })`
+   re-enters the agent loop in a way that keeps the tool/session
+   "waiting" even after cancel.
+3. Extension reload / `pi_extension_dev_reload_self` leaves orphaned
+   `setInterval` handles from the previous module instance.
+4. Multiple stacked questionnaires increment blocked/heartbeat without
+   matching clears.
+
+## Acceptance for re-enable
+
+- Heartbeat starts only while `ctx.ui.custom` is mounted.
+- Heartbeat is always cleared on submit, cancel, reject, dispose,
+  session_shutdown, and extension unload.
+- Turning the setting off mid-session stops the active timer.
+- No orphaned intervals after reload.
+- Integration test covering cancel + reload + double-open.
+
+## Workaround
+
+Feature hard-disabled in 2.1.7 until fixed. Setting is ignored.
