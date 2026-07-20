@@ -72,6 +72,30 @@ def test_parse_confirm_enum_other():
     assert r["answers"]["0"] == {"mode": "other", "text": "Maybe"}
 
 
+def test_parse_confirm_enum_custom_label_string_maps_by_position():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{
+            "header": "h", "question": "q?", "type": "confirm_enum",
+            "options": [{"label": "Approved"}, {"label": "Changes needed"}],
+        }],
+        "input": {"0": "Approved"},
+    })
+    assert r["answers"]["0"] == {"mode": "option", "value": "affirm"}
+
+
+def test_parse_confirm_enum_custom_option_object_maps_by_position():
+    r = run_harness({
+        "cmd": "parseAnswers",
+        "questions": [{
+            "header": "h", "question": "q?", "type": "confirm_enum",
+            "options": [{"label": "Approved"}, {"label": "Changes needed"}],
+        }],
+        "input": {"0": {"mode": "option", "value": "Changes needed"}},
+    })
+    assert r["answers"]["0"] == {"mode": "option", "value": "decline"}
+
+
 def test_parse_number():
     r = run_harness({
         "cmd": "parseAnswers",

@@ -671,10 +671,17 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					return;
 				}
 				const semantic = confirmSemanticValue(q, opt);
-				const value: ConfirmAnswer = {
-					mode: "option",
-					value: semantic === "affirm" ? "affirm" : "decline",
-				};
+				// Only the first two non-Other options are affirm/decline. A third+
+				// option has no canonical confirm value — ignore rather than
+				// silently mapping it to decline.
+				if (semantic === null) {
+					if (optionIndex !== idx) {
+						optionIndex = idx;
+						refresh();
+					}
+					return;
+				}
+				const value: ConfirmAnswer = { mode: "option", value: semantic };
 				saveAnswer(q, value);
 				commitAndAdvance();
 				return;

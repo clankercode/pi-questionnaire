@@ -460,6 +460,19 @@ test("confirm_enum: custom second option maps to decline by position", () => {
 	}
 });
 
+test("confirm_enum: third non-Other option does not silently become decline", () => {
+	const { component, getDone } = drive([{
+		header: "Review",
+		question: "Approve this change?",
+		type: "confirm_enum",
+		options: [{ label: "Approved" }, { label: "Changes needed" }, { label: "Defer" }],
+	}]);
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B"); // third option
+	component.handleInput("\r");
+	assert.equal(getDone(), null, "third non-Other confirm option must not commit as decline");
+});
+
 test("select_one Other: Ctrl+Left renders cursor on the active editor line", () => {
 	const { component } = drive([{
 		header: "x",

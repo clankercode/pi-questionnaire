@@ -238,12 +238,13 @@ function answerValue(q,i,el){
   if(q.type === 'confirm_enum'){
     if(isOtherTextInput(el) || el.value === '__other__') return otherAnswerValue(q,i,el);
     // Accept either radio DOM labels (Approved) or already-canonical values (affirm).
+    // Only first/second non-Other options map; unknown labels return null (no answer).
     const raw = String(el.value || '');
     if(raw.toLowerCase() === 'affirm' || raw.toLowerCase() === 'decline'){
       return {mode:'option', value: raw.toLowerCase()};
     }
     const semantic = confirmSemanticFromLabel(q,i,raw);
-    return {mode:'option', value: semantic === 'affirm' ? 'affirm' : 'decline'};
+    return semantic ? {mode:'option', value: semantic} : null;
   }
   if(q.type === 'number') return el.value === '' ? null : Number(el.value);
   return el.value;
@@ -472,7 +473,27 @@ function addChoice(parent,q,i,opt,j,kind){
   const input = document.createElement('input'); input.type = kind; input.name = 'q'+i; input.value = optionValue(opt); input.checked = isChoiceChecked(q,i,opt);
   input.dataset.focusKey = 'q-'+i+'-choice-'+j;
   input.onfocus = () => activateQuestion(i);
-  input.onchange = () => { activateQuestion(i); if(kind === 'radio'){ parent.querySelectorAll('input[type=radio][name="'+input.name+'"]').forEach(r => { if(r!==input) r.checked=false; }); parent.querySelectorAll('.choice-row').forEach(r => r.classList.remove('selected')); row.classList.add('selected'); } else { row.classList.toggle('selected', input.checked); } const value = answerValue(q,i,input); setLocalAnswer(i,value); updateActionLabels(); send({type:'answer', questionId:q.id, value}); };
+  input.onchange = () => {
+    activateQuestion(i);
+    if(kind === 'radio'){
+      parent.querySelectorAll('input[type=radio][name="'+input.name+'"]').forEach(r => { if(r!==input) r.checked=false; });
+      parent.querySelectorAll('.choice-row').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+    } else {
+      row.classList.toggle('selected', input.checked);
+    }
+    const value = answerValue(q,i,input);
+    // Third+ non-Other confirm options have no canonical affirm/decline mapping.
+    // Ignore the click rather than sending null/decline.
+    if(q.type === 'confirm_enum' && !opt.isOther && value === null){
+      input.checked = false;
+      row.classList.remove('selected');
+      return;
+    }
+    setLocalAnswer(i,value);
+    updateActionLabels();
+    send({type:'answer', questionId:q.id, value});
+  };
   const labelText = document.createElement('span'); labelText.className = 'label-text'; labelText.textContent = opt.label;
   row.append(input, labelText);
   row.onclick = (e) => { if(e.target.tagName==='INPUT'||isTextCtrl(e.target)||e.target.tagName==='BUTTON') return; activateQuestion(i); if(kind==='checkbox'){ input.checked=!input.checked; input.onchange(); } else if(kind==='radio'){ if(!input.checked){ input.checked=true; input.onchange(); } } };

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release notes.
 
+## [Unreleased]
+
+### Fixed
+
+- **Custom `confirm_enum` labels** — first/second non-Other options map to `affirm`/`decline` by position in both the TUI and browser UI (not only the literal labels `Affirm`/`Decline`). Selection restore uses canonical values. Third+ non-Other options no longer silently become `decline`. Answer coercion maps custom option labels the same way (`d31fbde` and follow-ups).
+- **Other-field zero hotkey** — typing `0` into a non-empty Other draft no longer jumps to the multi-question Submit tab; empty multi-question drafts still use the Submit hotkey; single-question Other accepts literal zero (`93ebccb`).
+- **Herdr blocked status** — while a questionnaire waits for human input, the extension emits Pi's shared `herdr:blocked` event (`active: true` / `active: false`) so Herdr's managed Pi integration can show authoritative blocked state. Replaces the ineffective lower-authority CLI `pane report-agent` path. Also fixed `ask_user` single-question mode so it enters the same lifecycle (`832b177`, `b6aa346`).
+
 ## [2.1.5] - 2026-07-13
 
 ### Fixed
@@ -15,7 +23,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ### Added
 
-- **Herdr `blocked` status** — when inside a [herdr](https://herdr.dev)-managed pane and the new `herdrReportBlocked` setting is on (default `true`), the extension reports the pane as `blocked` (with `custom-status "answering question"`) for the duration of an `AskUserQuestion`/`ask_user` TUI, and releases the authority on answer/cancel/throw. No-op outside herdr. Surfaces the agent-waiting-on-human state in herdr's sidebar, waits, and rollups.
+- **Herdr `blocked` status** — when `herdrReportBlocked` is on (default `true`), the extension emits Pi's shared `herdr:blocked` event while an `AskUserQuestion`/`ask_user` TUI waits for human input, so Herdr's managed Pi integration can surface blocked state. No-op when that integration is absent.
 
 ## [2.1.3] - 2026-06-30
 

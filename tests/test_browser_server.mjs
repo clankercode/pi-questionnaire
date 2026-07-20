@@ -448,6 +448,70 @@ test("browser confirm_enum maps custom labels by position and restores selection
 	}
 });
 
+test("browser confirm_enum third non-Other option does not map to decline", async () => {
+	const customQuestions = normalizeQuestions([
+		{
+			id: "review",
+			header: "Review",
+			question: "Approve this change?",
+			type: "confirm_enum",
+			options: [{ label: "Approved" }, { label: "Changes needed" }, { label: "Defer" }],
+		},
+	]);
+	const handle = await startBrowserSyncServer({
+		submitDebounceMs: 0,
+		questions: customQuestions,
+		preferredPort: 0,
+	});
+	try {
+		const page = await fetchText(handle.url);
+		const document = createFakeBrowserDom();
+		const sent = [];
+		const sockets = [];
+		class FakeWebSocket {
+			static OPEN = 1;
+			constructor(url) {
+				this.url = url;
+				this.readyState = FakeWebSocket.OPEN;
+				sockets.push(this);
+			}
+			send(message) {
+				sent.push(JSON.parse(message));
+			}
+		}
+		const context = vm.createContext({
+			document,
+			WebSocket: FakeWebSocket,
+			localStorage: createFakeLocalStorage(),
+			setInterval() {},
+			setTimeout(fn) { fn(); return 1; },
+			clearTimeout() {},
+		});
+		new vm.Script(await scriptFromPage(page.text, handle.url)).runInContext(context);
+		sockets[0].onmessage({
+			data: JSON.stringify({
+				type: "state",
+				questions: customQuestions,
+				currentTab: 0,
+				answers: {},
+				options: { notes: {} },
+				lifecycle: "open",
+			}),
+		});
+
+		const defer = document.querySelector('[data-focus-key="q-0-choice-2"]');
+		assert.ok(defer);
+		assert.equal(defer.value, "Defer");
+		const before = sent.length;
+		defer.checked = true;
+		defer.onchange();
+		const answerMsgs = sent.slice(before).filter((m) => m.type === "answer");
+		assert.equal(answerMsgs.length, 0, "third non-Other option must not emit affirm/decline");
+	} finally {
+		await handle.stop();
+	}
+});
+
 
 test("browser page treats internal Other sentinel text as unanswered", async () => {
 	const otherQuestions = normalizeQuestions([
@@ -626,7 +690,7 @@ test("browser page script restores answers and auto-tabs on control focus", asyn
 		assert.match(bundle, /input\.checked = isChoiceChecked/);
 		assert.match(bundle, /other\.value = otherAnswerText\(i\)/);
 		assert.match(bundle, /input\.onfocus = \(\) => activateQuestion\(i\)/);
-		assert.match(bundle, /input\.onchange = \(\) => \{ activateQuestion\(i\)/);
+		assert.match(bundle, /input\.onchange = \(\) => \{\s*activateQuestion\(i\)/);
 		assert.match(bundle, /el\.value === '' \? null : Number\(el\.value\)/);
 		assert.match(bundle, /setTimeout\(connect, reconnectDelay\)/);
 		assert.match(bundle, /if\(terminalLifecycle\) return/);

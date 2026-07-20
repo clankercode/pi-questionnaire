@@ -81,20 +81,30 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 	}
 
 	if (q.type === "confirm_enum") {
-		if (typeof raw === "string") {
-			const trimmed = raw.trim();
+		const mapConfirmLabel = (label: string): ConfirmAnswer | undefined => {
+			const trimmed = label.trim();
 			if (trimmed === "") return undefined;
-			// "__other__" is the browser radio sentinel, not user text.
-			// The real typed value must arrive as {mode:"other", text}.
 			if (isOtherSentinelText(trimmed)) return undefined;
-			if (trimmed === "affirm" || trimmed === CONFIRM_AFFIRM) {
+			const lower = trimmed.toLowerCase();
+			if (lower === "affirm" || trimmed === CONFIRM_AFFIRM) {
 				return { mode: "option", value: "affirm" };
 			}
-			if (trimmed === "decline" || trimmed === CONFIRM_DECLINE) {
+			if (lower === "decline" || trimmed === CONFIRM_DECLINE) {
 				return { mode: "option", value: "decline" };
 			}
-			// Otherwise treat as "Other" text
+			// Custom labels: first non-Other option → affirm, second → decline.
+			const nonOther = (q.options ?? []).filter((opt) => opt.label !== OTHER_LABEL);
+			const idx = nonOther.findIndex(
+				(opt) => opt.label === trimmed || opt.label.toLowerCase() === lower,
+			);
+			if (idx === 0) return { mode: "option", value: "affirm" };
+			if (idx === 1) return { mode: "option", value: "decline" };
+			// Unmatched free text is Other (not a silent decline).
 			return { mode: "other", text: trimmed };
+		};
+
+		if (typeof raw === "string") {
+			return mapConfirmLabel(raw);
 		}
 		if (typeof raw === "boolean") {
 			return { mode: "option", value: raw ? "affirm" : "decline" };
@@ -102,8 +112,10 @@ export function coerceAnswer(raw: unknown, q: CanonicalQuestion): AnswerValue | 
 		if (typeof raw === "object" && raw !== null) {
 			const obj = raw as { mode?: unknown; value?: unknown; text?: unknown };
 			if (obj.mode === "option" && typeof obj.value === "string") {
-				const v = obj.value.toLowerCase();
-				if (v === "affirm" || v === "decline") return { mode: "option", value: v };
+				const mapped = mapConfirmLabel(obj.value);
+				// Object option mode must stay option/undefined — never invent Other text.
+				if (mapped?.mode === "option") return mapped;
+				return undefined;
 			}
 			if (obj.mode === "other" && typeof obj.text === "string") {
 				if (isOtherSentinelText(obj.text)) return undefined;
