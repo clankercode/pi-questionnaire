@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-20T08:31:14Z"
 claimed_by: cli-user
-completed_at: null
+completed_at: "2026-07-20T08:46:55Z"
 complexity: medium
 created_at: "2026-07-17T07:14:39Z"
 depends_on: []
+duration_minutes: 15.688684783916667
 estimate_hours: 1
 id: B004
 priority: high
 started_at: "2026-07-20T08:31:14Z"
-status: in_progress
+status: done
 tags: []
 title: '''approve / x / other'' questions show as declined when selecting approve (possibly section option too)'
-updated_at: "2026-07-20T08:31:14Z"
+updated_at: "2026-07-20T08:46:55Z"
 ---
 
 'approve / x / other' questions show as declined when selecting approve (possibly section option too)
