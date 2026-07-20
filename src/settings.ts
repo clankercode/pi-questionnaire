@@ -42,9 +42,11 @@ export interface AskUserQuestionSettings {
 	ttsOnQuestion?: boolean;
 	/** Shell command to run when a questionnaire mounts (e.g. for custom alerts). */
 	onQuestionCommand?: string;
-	/** Send a keepalive heartbeat while the questionnaire is on screen. */
+	/** Send a keepalive heartbeat while the questionnaire is on screen.
+	 *  HARD-DISABLED in 2.1.7 (B005) — setting is accepted but ignored. */
 	heartbeatWhileActive?: boolean;
-	/** Idle heartbeat interval in minutes (matches pi's 4.5m default). */
+	/** Idle heartbeat interval in minutes (matches pi's 4.5m default).
+	 *  Unused while heartbeat is hard-disabled (B005). */
 	heartbeatIntervalMinutes?: number;
 	/** Debounce (ms) when typing into number/free_text inputs. */
 	debounceMs?: number;

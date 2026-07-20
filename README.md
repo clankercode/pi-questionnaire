@@ -119,8 +119,8 @@ Configured via `<agentDir>/ask-user-question.json` (global) and/or `<cwd>/.pi/as
 |              | `notificationDelaySeconds`  | `30`    | Delay before notification fires (0–300)              |
 |              | `ttsOnQuestion`             | `false` | Speak the header via `attn` on mount                 |
 |              | `onQuestionCommand`         | `""`    | Shell command to run on mount (gets payload via env) |
-| **Heartbeat**| `heartbeatWhileActive`      | `false` | Send a keepalive heartbeat while the TUI is on screen |
-|              | `heartbeatIntervalMinutes`  | `4.5`   | Idle interval in minutes (0.5–60)                    |
+| **Heartbeat**| `heartbeatWhileActive`      | `false` | **Hard-disabled (B005 / 2.1.7).** Setting ignored until lifecycle ownership is fixed. |
+|              | `heartbeatIntervalMinutes`  | `4.5`   | Unused while heartbeat is hard-disabled                                              |
 | **Input**    | `debounceMs`                | `300`   | Debounce (ms) when typing into number/free_text      |
 | **Safety**   | `dangerCheckEnabled`        | `true`  | Enforce the `is_dangerous` typed-confirmation flow   |
 | **Integrations** | `herdrReportBlocked`    | `true`  | Mark Pi `blocked` through the managed Herdr integration while a question is on screen |

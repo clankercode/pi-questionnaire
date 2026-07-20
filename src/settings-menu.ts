@@ -116,10 +116,14 @@ export const DEFAULT_SECTIONS: SectionDef[] = [
 	{
 		title: "Heartbeat & Debounce",
 		settings: [
-			{ id: "heartbeatWhileActive", label: "Heartbeat while active", type: "boolean" },
+			{
+				id: "heartbeatWhileActive",
+				label: "Heartbeat while active (disabled — B005)",
+				type: "boolean",
+			},
 			{
 				id: "heartbeatIntervalMinutes",
-				label: "Heartbeat interval (minutes)",
+				label: "Heartbeat interval (minutes, unused)",
 				type: "number",
 				min: 0.5,
 				max: 60,

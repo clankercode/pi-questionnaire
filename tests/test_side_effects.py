@@ -255,33 +255,28 @@ def test_heartbeat_off_no_interval():
     assert _interval_records(r) == []
 
 
-def test_heartbeat_on_starts_setInterval_with_default_4_5_minutes():
+def test_heartbeat_on_is_hard_disabled_b005():
+    """B005: heartbeatWhileActive is ignored until lifecycle ownership is fixed."""
     r = _fire([CONFIRM_Q], settings={"heartbeatWhileActive": True})
-    assert r["heartbeatStarted"] is True
-    assert "heartbeat" in r["effects"]
-    assert len(_interval_records(r)) == 1
-    # 4.5 minutes * 60_000 = 270_000 ms
-    assert _interval_records(r)[0]["ms"] == 270_000
+    assert r["heartbeatStarted"] is False
+    assert "heartbeat" not in r["effects"]
+    assert _interval_records(r) == []
+    assert any("hard-disabled" in line or "B005" in line for line in _log(r))
 
 
-def test_heartbeat_tick_calls_sendMessage_with_followup():
+def test_heartbeat_tick_does_not_send_when_hard_disabled():
     r = _fire(
         [CONFIRM_Q],
         settings={"heartbeatWhileActive": True, "heartbeatIntervalMinutes": 1.0},
         tickHeartbeat=True,
     )
-    # The harness ticks the interval once and records the sendMessage call.
-    assert r["heartbeatTick"] is not None
-    msg = r["heartbeatTick"]["message"]
-    opts = r["heartbeatTick"]["options"]
-    assert msg["customType"] == "ask-user-question-heartbeat"
-    assert msg["display"] is False
-    assert opts == {"triggerTurn": True, "deliverAs": "followUp"}
+    assert r["heartbeatStarted"] is False
+    assert r.get("heartbeatTick") is None
 
 
-def test_heartbeat_custom_interval():
+def test_heartbeat_custom_interval_hard_disabled():
     r = _fire([CONFIRM_Q], settings={"heartbeatWhileActive": True, "heartbeatIntervalMinutes": 10})
-    assert _interval_records(r)[0]["ms"] == 600_000
+    assert _interval_records(r) == []
 
 
 # --- 7. error tolerance --------------------------------------------------

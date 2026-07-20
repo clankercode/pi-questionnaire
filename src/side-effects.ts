@@ -413,34 +413,14 @@ export function fireOnQuestionSideEffects<
 	}
 
 	// -- 5. Heartbeat ----------------------------------------------------
+	// HARD-DISABLED (B005 / 2.1.7): `heartbeatWhileActive` can leave an
+	// orphaned setInterval that keeps injecting
+	// "AskUserQuestion is still waiting for an answer." after cancel,
+	// reload, or session end. Do not start the timer until lifecycle
+	// ownership is proven (mount → always clear on settle/unload).
+	// The setting remains in the schema for re-enable later; it is ignored.
 	if (settings.heartbeatWhileActive) {
-		const intervalMs = Math.max(1, settings.heartbeatIntervalMinutes) * 60_000;
-		heartbeatHandle = doSetInterval(() => {
-			try {
-				// sendMessage is async (returns Promise<void> in the SDK
-				// types). We fire-and-forget and swallow rejections so a
-				// single failed tick doesn't kill the interval.
-				const maybe = (sendMessage(
-					{
-						customType: HEARTBEAT_CUSTOM_TYPE,
-						content: "AskUserQuestion is still waiting for an answer.",
-						display: false,
-						details: { tickAt: Date.now() },
-					},
-					{ triggerTurn: true, deliverAs: "followUp" },
-				) as unknown) as Promise<unknown> | void;
-				if (maybe && typeof maybe.catch === "function") {
-					maybe.catch((err) => {
-						log(`heartbeat sendMessage rejected: ${(err as Error).message}`);
-					});
-				}
-			} catch (err) {
-				log(`heartbeat sendMessage threw: ${(err as Error).message}`);
-			}
-		}, intervalMs);
-		unref(heartbeatHandle as unknown as { unref?: () => void });
-		heartbeatStarted = true;
-		effects.push("heartbeat");
+		log("heartbeatWhileActive requested but hard-disabled (B005); ignoring");
 	}
 
 	// -- 6. Herdr blocked status -----------------------------------------

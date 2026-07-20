@@ -6,6 +6,12 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [2.1.7] - 2026-07-21
+
+### Changed
+
+- **Heartbeat hard-disabled (B005)** — `heartbeatWhileActive` is accepted in settings but no longer starts a timer. Orphaned keepalive messages (`AskUserQuestion is still waiting for an answer.`) could keep firing after cancel/reload. Feature stays off until lifecycle ownership (mount → always clear on settle/unload) is proven.
+
 ## [2.1.6] - 2026-07-21
 
 ### Fixed
