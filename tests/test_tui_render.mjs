@@ -1473,7 +1473,8 @@ test("multi-question stress: nav and submit across mixed question types", () => 
 	component.handleInput("\x1b[B");
 	component.handleInput("\r"); // Confirm2: decline
 	for (const ch of "charlie") component.handleInput(ch);
-	component.handleInput("0"); // Text3: Submit-tab jump commits while editor is active
+	// `0` is literal while free_text is open; use ] to commit + advance to Submit.
+	component.handleInput("]");
 	lines = component.render(120).join("\n");
 	assert.match(lines, /Submit answers/);
 	component.handleInput("\r");
@@ -2577,5 +2578,41 @@ test("global 0 still jumps to Submit when not in Other editor", () => {
 	const { component } = drive(questions);
 	component.handleInput("0");
 	assert.match(component.render(80).join("\n"), /Submit answers/);
+});
+
+test("free_text: zero on empty draft is a literal digit (not Submit hotkey)", () => {
+	const { component } = drive([
+		{ id: "text", header: "Text", question: "Type?", type: "free_text" },
+		{ id: "followup", header: "Follow-up", question: "Continue?", type: "confirm_enum" },
+	]);
+	// free_text auto-opens on mount
+	component.handleInput("0");
+	assert.equal(component.getEditorText(), "0");
+	assert.match(component.render(80).join("\n"), /Type\?/);
+	assert.doesNotMatch(component.render(80).join("\n"), /Submit answers/);
+});
+
+test("number: zero on empty draft is a literal digit (not Submit hotkey)", () => {
+	const { component } = drive([
+		{ id: "num", header: "Num", question: "How many?", type: "number" },
+		{ id: "followup", header: "Follow-up", question: "Continue?", type: "confirm_enum" },
+	]);
+	component.handleInput("0");
+	assert.equal(component.getEditorText(), "0");
+	assert.match(component.render(80).join("\n"), /How many\?/);
+	assert.doesNotMatch(component.render(80).join("\n"), /Submit answers/);
+});
+
+test("confirm_enum Other: zero on empty draft is a literal digit", () => {
+	const { component } = drive([
+		{ id: "c", header: "Confirm", question: "Ok?", type: "confirm_enum" },
+		{ id: "followup", header: "Follow-up", question: "Continue?", type: "select_one", options: [{ label: "A" }] },
+	]);
+	// down to Other (Affirm, Decline, Other)
+	component.handleInput("\u001b[B");
+	component.handleInput("\u001b[B");
+	component.handleInput("0");
+	assert.equal(component.getEditorText(), "0");
+	assert.doesNotMatch(component.render(80).join("\n"), /Submit answers/);
 });
 

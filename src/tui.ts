@@ -230,7 +230,7 @@ const KEYMAP_HELP = [
 	"  Meta+1-4    Jump to question N (multi-question)",
 	"  [ / ]       Previous / next question tab",
 	"  ← / →      Previous / next question tab (multi)",
-	"  0           Jump to Submit tab (not while typing Other)",
+	"  0           Jump to Submit tab (not while typing text/Other)",
 	"  e           Toggle preview expansion (current option)",
 	"  o           Open browser URL (in browser view)",
 	"  ?           Show this help",
@@ -1013,7 +1013,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					const isMetaJump = data.startsWith("\x1b") && data.length >= 2
 						&& data[1] >= "1" && data[1] <= "4";
 					// Accept CSI and application-mode arrows via matchesKey.
-					const isNavKey = data === "[" || data === "]" || data === "0"
+					// "0" is NEVER a Submit hotkey while free_text/number editors
+					// are open — it is always a literal digit (including empty).
+					// Jump to Submit with `0` only from option navigation / non-editor modes.
+					const isNavKey = data === "[" || data === "]"
 						|| matchesKey(data, Key.left) || matchesKey(data, Key.right)
 						|| isMetaJump;
 					if (isNavKey && isMulti) {
