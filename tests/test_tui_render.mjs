@@ -520,7 +520,9 @@ test("select_one Other: zero appends to a non-empty draft instead of opening Sub
 	assert.doesNotMatch(joined, /Submit answers/);
 });
 
-test("select_one Other: zero on an empty draft retains the multi-question Submit hotkey", () => {
+test("select_one Other: zero on an empty draft is a literal digit (not Submit hotkey)", () => {
+	// Once the Other editor is open, "0" is always text. Jump to Submit with
+	// `0` only works from option navigation / non-Other modes.
 	const { component } = drive([
 		{ id: "choice", header: "Choice", question: "Pick?", type: "select_one", options: [{ label: "A" }, { label: "B" }] },
 		{ id: "followup", header: "Follow-up", question: "Continue?", type: "confirm_enum" },
@@ -529,7 +531,9 @@ test("select_one Other: zero on an empty draft retains the multi-question Submit
 	component.handleInput("\u001b[B");
 	component.handleInput("0");
 
-	assert.match(component.render(80).join("\n"), /Submit answers/);
+	assert.equal(component.getEditorText(), "0");
+	assert.match(component.render(80).join("\n"), /Pick\?/);
+	assert.doesNotMatch(component.render(80).join("\n"), /Submit answers/);
 });
 
 test("select_one Other: zero is literal in a single-question form", () => {
@@ -972,7 +976,7 @@ test("notes Enter saves and returns to answer view", () => {
 	}
 });
 
-test("notes Tab saves and cycles to the next question tab", () => {
+test("notes Tab saves and returns to the same question (does not advance)", () => {
 	const questions = [
 		{ header: "a", question: "A?", type: "select_one", options: [{ label: "Yes" }] },
 		{ header: "b", question: "B?", type: "select_one", options: [{ label: "Go" }] },
@@ -982,10 +986,8 @@ test("notes Tab saves and cycles to the next question tab", () => {
 	for (const ch of "side note") component.handleInput(ch);
 	component.handleInput("\t");
 	let lines = component.render(80).join("\n");
-	assert.match(lines, /B\?/);
+	assert.match(lines, /A\?/, "Tab should return to the same question, not advance");
 	assert.doesNotMatch(lines, /Notes for "a"/);
-	component.handleInput("[");
-	lines = component.render(80).join("\n");
 	assert.match(lines, /Note: side note/);
 });
 
@@ -2549,3 +2551,31 @@ test("multi_select Other: toggling a regular option preserves the existing Other
 		}
 	}
 });
+
+test("Other multi: Left/Right switch tabs (application-mode too)", () => {
+	const questions = [
+		{ header: "One", question: "Q1?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Two", question: "Q2?", type: "select_one", options: [{ label: "B" }] },
+	];
+	const { component } = drive(questions);
+	// open Other on q0
+	component.handleInput("\u001b[B"); // Other
+	assert.equal(typeof component.getEditorText, "function");
+	component.handleInput("\x1b[C"); // CSI Right while Other open
+	assert.match(component.render(80).join("\n"), /Q2\?/);
+	// open Other on q1 then application Left
+	component.handleInput("\u001b[B");
+	component.handleInput("\x1bOD");
+	assert.match(component.render(80).join("\n"), /Q1\?/);
+});
+
+test("global 0 still jumps to Submit when not in Other editor", () => {
+	const questions = [
+		{ header: "One", question: "Q1?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Two", question: "Q2?", type: "select_one", options: [{ label: "B" }] },
+	];
+	const { component } = drive(questions);
+	component.handleInput("0");
+	assert.match(component.render(80).join("\n"), /Submit answers/);
+});
+

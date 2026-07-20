@@ -225,11 +225,12 @@ const KEYMAP_HELP = [
 	"  ↑/↓         Navigate options (or nudge value on number)",
 	"  Enter       Select / commit / submit",
 	"  Space       Toggle (select_many)",
-	"  Tab / n     Swap to notes editor (or back)",
+	"  Tab / n     Swap to notes editor (or back; same question)",
 	"  1-9         Select option index (choice questions)",
 	"  Meta+1-4    Jump to question N (multi-question)",
 	"  [ / ]       Previous / next question tab",
-	"  0           Jump to Submit tab",
+	"  ← / →      Previous / next question tab (multi)",
+	"  0           Jump to Submit tab (not while typing Other)",
 	"  e           Toggle preview expansion (current option)",
 	"  o           Open browser URL (in browser view)",
 	"  ?           Show this help",
@@ -923,7 +924,9 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			const isTabKey = data === "\t" || matchesKey(data, Key.tab);
 			if (isTabKey) {
 				if (inputMode === "notes") {
-					closeNotes({ advanceTab: true });
+					// Tab toggles notes closed on the same question. Use ] / Right
+					// (or `[` / Left) to change tabs — not Tab.
+					closeNotes();
 					return;
 				}
 				const q = currentQuestion();
@@ -970,23 +973,30 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// Note: 'n' is NOT in the nav-key list because it's a
 					// printable character the user might type into the
 					// editor. Tab is the canonical notes toggle, not 'n'.
-					// Left/Right stay in the Other editor (cursor movement),
-					// not tab navigation. Tab is the canonical notes toggle.
-					const isZeroSubmitHotkey = data === "0" && isMulti && editor.getText() === "";
+					// Once Other is open, "0" is always a literal digit — never
+					// the multi-question Submit hotkey (use `0` from option
+					// navigation / non-Other modes instead).
+					// In multi-question forms, Left/Right (and `[`/`]`) leave
+					// Other and change tabs; in single-question they stay as
+					// cursor movement inside the editor.
+					const isTabNavKey = isMulti && (
+						data === "[" || data === "]"
+						|| matchesKey(data, Key.left) || matchesKey(data, Key.right)
+					);
 					const isNavKey = matchesKey(data, Key.up) || matchesKey(data, Key.down)
-						|| isZeroSubmitHotkey
+						|| isTabNavKey
 						|| matchesKey(data, Key.tab);
 					if (!isNavKey) {
 						editor.handleInput(data);
 						refresh();
 						return;
 					}
-					// Nav key: close the editor and fall through to the
-					// option-navigation handlers. We DON'T return here —
-					// the `otherHandled` flag below tells the bottom of
-					// the inputMode block to skip the final
-					// editor.handleInput, and we fall through out of the
-					// whole inputMode block to the option-nav handlers.
+					// Nav key: preserve draft, close the editor, fall through.
+					// Up/Down go to option nav; Left/Right/`[`/`]` go to tab nav.
+					const draft = editor.getText();
+					const qOther = currentQuestion();
+					if (qOther && draft !== "") answerDrafts[qOther.id] = draft;
+					else if (qOther) delete answerDrafts[qOther.id];
 					inputMode = null;
 					inputQuestionId = null;
 					editor.setText("");
