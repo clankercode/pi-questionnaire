@@ -2240,6 +2240,39 @@ test("Submit tab: Left arrow navigates back to the previous question", () => {
 	);
 });
 
+test("Submit tab: application-mode Left (\\x1bOD) navigates back", () => {
+	// Many terminals send SS3 application arrows (\\x1bOD/\\x1bOC) instead of
+	// CSI (\\x1b[D/\\x1b[C). Submit-tab back must accept both.
+	const questions = [
+		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Tags", question: "Tags?", type: "select_many", options: [{ label: "bug" }] },
+	];
+	const { component } = drive(questions);
+	component.handleInput("1");
+	component.handleInput("1");
+	component.handleInput("0");
+	assert.match(component.render(80).join("\n"), /Submit answers/);
+	component.handleInput("\x1bOD");
+	const joined = component.render(80).join("\n");
+	assert.doesNotMatch(joined, /Submit answers/, "application-mode Left should leave Submit");
+	assert.match(joined, /Tags/);
+});
+
+test("Left/Right arrows switch question tabs (CSI and application mode)", () => {
+	const questions = [
+		{ header: "One", question: "Q1?", type: "select_one", options: [{ label: "A" }] },
+		{ header: "Two", question: "Q2?", type: "select_one", options: [{ label: "B" }] },
+	];
+	const { component } = drive(questions);
+	assert.match(component.render(80).join("\n"), /Q1\?/);
+	component.handleInput("\x1b[C"); // CSI Right
+	assert.match(component.render(80).join("\n"), /Q2\?/);
+	component.handleInput("\x1bOD"); // application Left
+	assert.match(component.render(80).join("\n"), /Q1\?/);
+	component.handleInput("\x1bOC"); // application Right
+	assert.match(component.render(80).join("\n"), /Q2\?/);
+});
+
 test("Submit tab warns clearly when answers are missing", () => {
 	const questions = [
 		{ header: "Pick", question: "Pick one?", type: "select_one", options: [{ label: "A" }] },

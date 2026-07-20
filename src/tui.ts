@@ -970,7 +970,6 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					// Note: 'n' is NOT in the nav-key list because it's a
 					// printable character the user might type into the
 					// editor. Tab is the canonical notes toggle, not 'n'.
-					// Left/Right arrows (\x1b[D / \x1b[C) navigate question tabs,
 					// Left/Right stay in the Other editor (cursor movement),
 					// not tab navigation. Tab is the canonical notes toggle.
 					const isZeroSubmitHotkey = data === "0" && isMulti && editor.getText() === "";
@@ -1003,8 +1002,10 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				if (inputMode === "free_text" || inputMode === "number") {
 					const isMetaJump = data.startsWith("\x1b") && data.length >= 2
 						&& data[1] >= "1" && data[1] <= "4";
+					// Accept CSI and application-mode arrows via matchesKey.
 					const isNavKey = data === "[" || data === "]" || data === "0"
-						|| data === "\x1b[D" || data === "\x1b[C" || isMetaJump;
+						|| matchesKey(data, Key.left) || matchesKey(data, Key.right)
+						|| isMetaJump;
 					if (isNavKey && isMulti) {
 						const currentQ = currentQuestion();
 						if (currentQ && editor.getText().trim() !== "") {
@@ -1088,7 +1089,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 				const isMetaJump = data.startsWith("\x1b") && data.length >= 2
 					&& data[1] >= "1" && data[1] <= "4";
 				const isNavKey = data === "[" || data === "]" || data === "0"
-					|| data === "\x1b[D" || data === "\x1b[C" || isMetaJump;
+					|| matchesKey(data, Key.left) || matchesKey(data, Key.right)
+					|| isMetaJump;
 				if (!isMulti || !isNavKey) {
 					return;
 				}
@@ -1099,8 +1101,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 			// that `[`, `]`, `0`, Meta+1-4 work from any tab — including
 			// the Submit tab (where there's no active question).
 			if (isMulti) {
-				// [ or Left arrow: previous question tab
-				if (data === "[" || data === "\x1b[D") {
+				// [ or Left arrow: previous question tab (CSI + application mode)
+				if (data === "[" || matchesKey(data, Key.left)) {
 					currentTab = Math.max(0, currentTab - 1);
 					optionIndex = 0;
 					opts.onBrowserStateChange?.({ currentTab });
@@ -1108,8 +1110,8 @@ export function buildQuestionnaireComponent(opts: TuiOptions) {
 					reconcileMode(); // drive inputMode to match the new tab
 					return;
 				}
-				// ] or Right arrow: next question tab
-				if (data === "]" || data === "\x1b[C") {
+				// ] or Right arrow: next question tab (CSI + application mode)
+				if (data === "]" || matchesKey(data, Key.right)) {
 					currentTab = Math.min(questions.length, currentTab + 1);
 					if (currentTab === questions.length) submitScreenEnteredAt = Date.now();
 					optionIndex = 0;
