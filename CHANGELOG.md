@@ -6,9 +6,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [2.1.6] - 2026-07-20
+
 ### Fixed
 
-- **Custom `confirm_enum` labels** — first/second non-Other options map to `affirm`/`decline` by position in both the TUI and browser UI (not only the literal labels `Affirm`/`Decline`). Selection restore uses canonical values. Third+ non-Other options no longer silently become `decline`. Answer coercion maps custom option labels the same way (`d31fbde` and follow-ups).
+- **Custom `confirm_enum` labels** — first/second non-Other options map to `affirm`/`decline` by position in both the TUI and browser UI (not only the literal labels `Affirm`/`Decline`). Selection restore uses canonical values. Third+ non-Other options no longer silently become `decline`. Answer coercion maps custom option labels the same way (`d31fbde`, `4de4a38`).
 - **Other-field zero hotkey** — typing `0` into a non-empty Other draft no longer jumps to the multi-question Submit tab; empty multi-question drafts still use the Submit hotkey; single-question Other accepts literal zero (`93ebccb`).
 - **Herdr blocked status** — while a questionnaire waits for human input, the extension emits Pi's shared `herdr:blocked` event (`active: true` / `active: false`) so Herdr's managed Pi integration can show authoritative blocked state. Replaces the ineffective lower-authority CLI `pane report-agent` path. Also fixed `ask_user` single-question mode so it enters the same lifecycle (`832b177`, `b6aa346`).
 
