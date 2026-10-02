@@ -6,6 +6,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [2.1.8] - 2026-10-03
+
+### Changed
+- **Pi 1.0 host modules** — `typebox` is a peer dependency (`*`) instead of a direct dependency. Peer ranges for `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` no longer cap at `<1`, so Pi 1.0 satisfies them.
+
 ## [2.1.7] - 2026-07-21
 
 ### Changed
